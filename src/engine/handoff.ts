@@ -6,7 +6,8 @@
 
 import type { Handoff, Store } from "../core.ts"
 import type { EngineDeps, Host, TranscriptMessage } from "./host.ts"
-import { touchedFiles } from "./transcript.ts"
+import { toProjectPath, touchedFiles } from "./transcript.ts"
+import { worktreeRoot } from "./worktree.ts"
 
 export type Narrative = NonNullable<Handoff["narrative"]>
 
@@ -156,9 +157,16 @@ export async function isFirstRequest(host: Host, sessionID: string): Promise<boo
 }
 
 async function snapshot(host: Host, sessionID: string, directory: string, messages: TranscriptMessage[]) {
-  const paths = touchedFiles(messages, directory).slice(0, FILES_MAX)
+  // snapshot and vcs paths are relative to the git worktree root, not to the
+  // project, when the project is a subdirectory of the repository.
+  const root = await worktreeRoot(directory)
+  const paths = touchedFiles(messages, directory, root).slice(0, FILES_MAX)
   const info = host.vcs ? await host.vcs(directory).catch(() => undefined) : undefined
-  const status = new Map((info?.changed ?? []).map((file) => [file.file, file.status]))
+  const status = new Map<string, string>()
+  for (const file of info?.changed ?? []) {
+    const projectPath = toProjectPath(file.file, directory, root)
+    if (projectPath) status.set(projectPath, file.status)
+  }
   const request = oneLine(await host.lastUserText(sessionID).catch(() => ""), REQUEST_CHARS)
   return {
     files: paths.map((path) => ({ path, status: fileStatus(status.get(path)) })),

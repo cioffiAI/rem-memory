@@ -3,3 +3,4 @@ node_modules/
 *.tgz
 *.log
 .DS_Store
+.claude/

@@ -69,3 +69,14 @@ describe("touchedFiles", () => {
     expect(touchedFiles(messages, project)).toEqual(["a.txt"])
   })
 })
+
+describe("touchedFiles in a project that is a subdirectory of the repository", () => {
+  const repo = "/work"
+  test("snapshot paths are relative to the worktree root, tool paths to the project", () => {
+    const messages = [
+      assistant({ snapshotFiles: ["app/src/a.ts", "other/b.ts", "README.md"] }),
+      assistant({ tools: [{ name: "edit", input: { path: "src/c.ts" } }] }),
+    ]
+    expect(touchedFiles(messages, project, repo)).toEqual(["src/a.ts", "src/c.ts"])
+  })
+})

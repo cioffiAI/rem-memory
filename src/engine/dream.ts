@@ -8,6 +8,7 @@ import { createAnchor, createAnchorCache, describeCheck, entryAnchorState, parse
 import { dropTrivialHandoff, parseNarrative, recordHandoff } from "./handoff.ts"
 import type { EngineDeps } from "./host.ts"
 import { touchedFiles } from "./transcript.ts"
+import { worktreeRoot } from "./worktree.ts"
 
 function now() {
   return Date.now()
@@ -116,7 +117,7 @@ export async function consolidate(deps: EngineDeps, sessionID: string) {
     entryLines.push(`- [${entry.id}] (${entry.scope}/${entry.category}, w=${entry.weight.toFixed(1)}, source=${entry.source}) ${entry.text}${broken}`)
   }
   const entriesBlock = visible.length === 0 ? "(none)" : entryLines.join("\n")
-  const touched = touchedFiles(messages, directory)
+  const touched = touchedFiles(messages, directory, await worktreeRoot(directory))
   const anchorTask = touched.length > 0
     ? `
 CODE ANCHORS:
