@@ -101,11 +101,11 @@ plugin, and the automatic DREAM cycle runs regardless.
 | Tool | Purpose |
 | --- | --- |
 | `memory_read` | Search facts (query / category / scope); multi-word queries match all terms; global + current project only |
-| `memory_write` | Store an explicit fact; identical text refreshes it (`tier`, `ttlHours`, `pinned`, `sensitivity`) |
-| `memory_update` | Correct a fact, by `id` or match — resolves CONFLICTED entries |
+| `memory_write` | Store an explicit fact; identical text refreshes it (`tier`, `ttlHours`, `pinned`, `sensitivity`, `anchors`) |
+| `memory_update` | Correct a fact, by `id` or match — resolves CONFLICTED entries; `anchors` replaces its code anchors |
 | `memory_forget` / `memory_clear` | Remove facts; `memory_clear({ summaryOnly: true })` clears only the shared summary |
-| `memory_why` | Audit a memory: provenance, lifecycle, score breakdown |
-| `memory_inspect` | `stats` \| `recent` \| `conflicts` \| `project` \| `surfaced` |
+| `memory_why` | Audit a memory: provenance, lifecycle, score breakdown, code anchors |
+| `memory_inspect` | `stats` \| `recent` \| `conflicts` \| `project` \| `surfaced` \| `stale` (code-anchored memories that drifted or broke) |
 | `memory_useful` / `memory_irrelevant` | Feedback on retrieval quality |
 
 `memory_write` retains distinct facts even when they share similar wording or
@@ -138,6 +138,45 @@ Last surfacing (session abc):
   Core bonus:    yes
   Final rank:    #2
 ```
+
+## Code-anchored memories
+
+A project fact can point at the code it is about. Pass `anchors` to
+`memory_write` or `memory_update` (project scope only, at most 3 per entry):
+
+```text
+memory_write({ fact: "withLock serializes all store writes.", scope: "project",
+               anchors: ["src/store.ts#withLock"] })
+```
+
+An anchor is `path` or `path#symbol`, relative to the project. It records a
+hash of the file at that moment. The state is **derived on every read and never
+stored**, so switching branches back and forth is harmless:
+
+| State | When | Effect |
+| --- | --- | --- |
+| `fresh` | the file is unchanged | normal |
+| `drifted` | the file changed (and the symbol, if any, is still there) | still surfaced, with the note `(code changed since: src/store.ts)`; `memory_read` shows `[drifted]` |
+| `broken` | the file is gone, or the symbol no longer appears in it | not surfaced automatically; `memory_read` shows `[stale: src/store.ts#withLock symbol missing]` |
+
+An entry's state is the worst of its anchors. `memory_inspect({ show: "stale" })`
+lists drifted and broken memories; `memory_why` has an `Anchors:` section.
+Re-confirm a memory with `memory_useful`, `memory_update` or by repeating the
+same `memory_write`: the hashes are recomputed and the entry is fresh again
+(if the file is still missing, the old anchor is kept and stays stale).
+
+- Paths are resolved with `realpath` and must stay inside the project:
+  absolute paths, `..` and symlinks that leave the project are rejected, and
+  nothing outside the project is ever read. An invalid anchor on an explicit
+  write returns an error and saves nothing.
+- Files over 1 MB are compared by size and modification time instead of content.
+- DREAM may attach anchors to new project facts, but only to files touched in
+  the session (and only if the file and symbol exist); invalid ones are
+  dropped and the fact is kept. Broken anchors are flagged to the model as
+  `anchor=broken(...)`: dreamed entries may be updated or deleted, explicit
+  ones are never deleted (conflicts only).
+- Anchors are checked only for the few candidates about to be shown, so the
+  per-request cost stays small. Entries without anchors behave exactly as before.
 
 ## Recency, exposure and feedback
 

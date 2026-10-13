@@ -13,10 +13,15 @@ import {
   score,
   type RankedMemory,
 } from "../core.ts"
+import { createAnchorCache, entryAnchorState, type AnchorCache } from "./anchors.ts"
 import type { EngineDeps } from "./host.ts"
 
 type RerankCacheEntry = { at: number; order: string[]; abstain?: boolean }
-type SurfaceState = { lastSurface: Map<string, RankedMemory[]>; rerankCache: Map<string, RerankCacheEntry> }
+type SurfaceState = {
+  lastSurface: Map<string, RankedMemory[]>
+  rerankCache: Map<string, RerankCacheEntry>
+  anchorCache: AnchorCache
+}
 
 function now() {
   return Date.now()
@@ -115,21 +120,41 @@ async function buildMemoryBlock(
   })
   const reranked = config.rerank ? await rerank(deps, state.rerankCache, sessionID, query, ranked) : ranked
   const qualified = config.rerank ? reranked : reranked.filter(passesRelevanceGate)
-  const top = qualified.slice(0, config.maxFacts)
+  // Anchor state is only computed for candidates that could be shown, in rank
+  // order, so I/O stays bounded. Broken anchors are skipped (and replaced by
+  // the next candidate); drifted ones get a note on their line.
+  const drifted = new Map<string, string[]>()
+  const usable = async (entry: RankedMemory["entry"]) => {
+    if (!entry.anchors?.length) return true
+    const anchorState = await entryAnchorState(entry, state.anchorCache)
+    if (anchorState.state === "broken") return false
+    if (anchorState.state === "drifted") {
+      drifted.set(entry.id, anchorState.checks.filter((check) => check.state === "drifted").map((check) => check.anchor.path))
+    }
+    return true
+  }
+  const top: RankedMemory[] = []
+  for (const candidate of qualified) {
+    if (top.length >= config.maxFacts) break
+    if (await usable(candidate.entry)) top.push(candidate)
+  }
   const selected = new Set(top.map((candidate) => candidate.entry.id))
-  const core = coreSlot(store, directory, selected, time, config.coreSlot)
-  const surfaced: RankedMemory[] = [
-    ...top,
-    ...core.map((entry, index) => ({
+  const coreEntries: typeof top = []
+  const coreCandidates = coreSlot(store, directory, selected, time, Number.POSITIVE_INFINITY)
+  for (const entry of coreCandidates) {
+    if (coreEntries.length >= config.coreSlot) break
+    if (!(await usable(entry))) continue
+    coreEntries.push({
       entry,
       base: score(entry, time),
       keywordHits: 0,
       matches: [],
       core: true,
-      rank: top.length + index + 1,
+      rank: top.length + coreEntries.length + 1,
       final: score(entry, time),
-    })),
-  ]
+    })
+  }
+  const surfaced: RankedMemory[] = [...top, ...coreEntries]
   state.lastSurface.set(sessionID, surfaced)
   void markSurfaced(deps, surfaced.map((candidate) => candidate.entry.id), time)
 
@@ -143,7 +168,9 @@ async function buildMemoryBlock(
     for (const candidate of surfaced) {
       const entry = candidate.entry
       const status = entry.status === "CONFLICTED" ? ", conflicted" : ""
-      lines.push(`- [${entry.source}] (${entry.category}${status}) ${entry.text}`)
+      const changed = drifted.get(entry.id)
+      const note = changed?.length ? ` (code changed since: ${[...new Set(changed)].join(", ")})` : ""
+      lines.push(`- [${entry.source}] (${entry.category}${status}) ${entry.text}${note}`)
     }
     lines.push("</facts>")
   }
@@ -154,7 +181,7 @@ async function buildMemoryBlock(
 }
 
 export function createSurface(deps: EngineDeps) {
-  const state: SurfaceState = { lastSurface: new Map(), rerankCache: new Map() }
+  const state: SurfaceState = { lastSurface: new Map(), rerankCache: new Map(), anchorCache: createAnchorCache() }
   return {
     // What each session was last shown; read by memory_why and memory_inspect.
     lastSurface: state.lastSurface as ReadonlyMap<string, RankedMemory[]>,

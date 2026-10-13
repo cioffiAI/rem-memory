@@ -520,6 +520,23 @@ export function prune(store: Store, t = Date.now(), maxEntries = 400) {
 
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
+// Anchors reaching applyConsolidation were already resolved against the
+// filesystem by the DREAM step; here we only keep well-formed ones.
+function sanitizeAnchors(value: unknown): Anchor[] {
+  if (!Array.isArray(value)) return []
+  const anchors: Anchor[] = []
+  for (const item of value) {
+    if (!item || typeof item.path !== "string" || typeof item.hash !== "string" || typeof item.anchoredAt !== "number") continue
+    anchors.push({
+      path: item.path,
+      ...(typeof item.symbol === "string" && item.symbol ? { symbol: item.symbol } : {}),
+      hash: item.hash,
+      anchoredAt: item.anchoredAt,
+    })
+  }
+  return anchors.slice(0, 3)
+}
+
 export type ConsolidationSource = {
   sessionID?: string
   messageIDs?: string[]
@@ -569,6 +586,8 @@ export function applyConsolidation(
       existing.extractedAt = t
       if (confidence !== undefined) existing.confidence = confidence
       if (scope === "project" && !existing.projectID) existing.projectID = projectID
+      const anchors = existing.scope === "project" ? sanitizeAnchors(item.anchors) : []
+      if (anchors.length > 0) existing.anchors = anchors
     } else {
       // Topic-level guard: same category + shared content word → treat as
       // duplicate of an explicit fact even across languages. Restricted to
@@ -580,11 +599,13 @@ export function applyConsolidation(
         log?.("debug", "dedup skipped (topic clash with explicit)", { text, existingId: clash.id })
         continue
       }
+      const anchors = scope === "project" ? sanitizeAnchors(item.anchors) : []
       addEntry(store, {
         text,
         category,
         scope,
         projectID: scope === "project" ? projectID : undefined,
+        ...(anchors.length > 0 ? { anchors } : {}),
         weight: 1,
         lastSeen: t,
         source: "dreamed",
@@ -611,6 +632,8 @@ export function applyConsolidation(
       target.lastSeen = t
       target.extractedAt = t
       target.sourceSessionID = source?.sessionID ?? target.sourceSessionID
+      const anchors = target.scope === "project" ? sanitizeAnchors(item.anchors) : []
+      if (anchors.length > 0) target.anchors = anchors
     }
   }
   for (const item of parsed.delete ?? []) {

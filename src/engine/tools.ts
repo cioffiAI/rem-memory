@@ -14,8 +14,18 @@ import {
   readQuery,
   readableEntries,
   score,
+  type Anchor,
   type Entry,
 } from "../core.ts"
+import {
+  anchorLabel,
+  AnchorError,
+  createAnchorCache,
+  createAnchors,
+  describeCheck,
+  entryAnchorState,
+  refreshAnchors,
+} from "./anchors.ts"
 import type { EngineDeps } from "./host.ts"
 import type { Surface } from "./surface.ts"
 
@@ -56,6 +66,22 @@ function objectSchema(properties: Record<string, JsonSchema>, required: string[]
 
 export function createTools({ host, config, store: storeIO }: EngineDeps, surface: Surface): MemoryTool[] {
   const categoryDescription = "Optional category: user, project, workflow, preferences, decisions, status, environment, other"
+  const anchorCache = createAnchorCache()
+  const anchorsDescription =
+    'Optional code anchors for a project fact: up to 3 files of this project, as "src/store.ts" or "src/store.ts#symbol". The memory is flagged when that code changes and hidden when the file or symbol disappears. Project scope only.'
+  const anchorMessage = (error: unknown) => `Invalid anchor: ${error instanceof AnchorError ? error.message : String(error)} Nothing was saved.`
+  const anchorsShapeError = () =>
+    anchorMessage(new AnchorError("invalid", 'anchors must be an array of strings like "src/x.ts" or "src/x.ts#symbol".'))
+  // Suffix shown by memory_read next to anchored entries.
+  const staleMarker = async (entry: Entry) => {
+    if (!entry.anchors?.length) return ""
+    const anchorState = await entryAnchorState(entry, anchorCache)
+    if (anchorState.state === "drifted") return " [drifted]"
+    if (anchorState.state === "broken") {
+      return ` [stale: ${anchorState.checks.filter((check) => check.state === "broken").map(describeCheck).join("; ")}]`
+    }
+    return ""
+  }
   return [
     {
       name: "memory_read",
@@ -74,10 +100,11 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
           scope: args.scope === "project" ? "project" : args.scope === "global" ? "global" : undefined,
         })
         if (hits.length === 0) return "No memory entries found."
-        return [
-          config.summary && store.summary ? `Summary: ${store.summary}` : null,
-          ...hits.map((entry) => `- [${entry.id}] (${entry.scope}/${entry.category}, ${entry.source}) ${entry.text}`),
-        ].filter(Boolean).join("\n")
+        const lines: string[] = []
+        for (const entry of hits) {
+          lines.push(`- [${entry.id}] (${entry.scope}/${entry.category}, ${entry.source}) ${entry.text}${await staleMarker(entry)}`)
+        }
+        return [config.summary && store.summary ? `Summary: ${store.summary}` : null, ...lines].filter(Boolean).join("\n")
       },
     },
     {
@@ -91,6 +118,7 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
         ttlHours: { type: "number", description: "Lifetime in hours for a temporary memory (default 24)" },
         pinned: { type: "boolean", description: "Pinned memories never decay" },
         sensitivity: { type: "string", enum: ["normal", "private", "local-only"], description: "local-only is stored on disk and never exposed to a model or tool" },
+        anchors: { type: "array", items: { type: "string" }, description: anchorsDescription },
       }, ["fact"]),
       execute: async (args, context) => {
         const text = String(args.fact ?? "").trim()
@@ -100,6 +128,17 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
         const tier: Entry["tier"] = args.tier === "temporary" || args.tier === "archival" || args.tier === "core" ? args.tier : undefined
         const sensitivity: Entry["sensitivity"] = args.sensitivity === "private" || args.sensitivity === "local-only" ? args.sensitivity : undefined
         const expiresAt = tier === "temporary" ? now() + Number(args.ttlHours ?? 24) * 60 * 60 * 1000 : undefined
+        let anchors: Anchor[] | undefined
+        if (args.anchors !== undefined && !Array.isArray(args.anchors)) return anchorsShapeError()
+        if (Array.isArray(args.anchors) && args.anchors.length > 0) {
+          if (scope !== "project") return 'Anchors are only allowed on project-scoped facts (set scope "project"). Nothing was saved.'
+          if (!directory) return "Invalid anchor: the project directory is unknown. Nothing was saved."
+          try {
+            anchors = await createAnchors(args.anchors, directory, now(), anchorCache)
+          } catch (error) {
+            return anchorMessage(error)
+          }
+        }
         let status = ""
         await storeIO.withLock(async () => {
           const fresh = await storeIO.getStore()
@@ -118,6 +157,8 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
             if (sensitivity) existing.sensitivity = sensitivity
             if (args.category) existing.category = String(args.category)
             if (scope === "project" && !existing.projectID) existing.projectID = directory
+            if (anchors) existing.anchors = anchors
+            else if (existing.anchors?.length) existing.anchors = await refreshAnchors(existing.anchors, existing.projectID, now(), anchorCache)
             if (existing.status === "CONFLICTED") {
               existing.status = "ACTIVE"
               existing.conflictEvidence = undefined
@@ -130,6 +171,7 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
               category: String(args.category ?? "other"),
               scope,
               projectID: scope === "project" ? directory : undefined,
+              ...(anchors ? { anchors } : {}),
               weight: 3,
               lastSeen: now(),
               source: "explicit",
@@ -156,6 +198,7 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
         id: { type: "string", description: "Entry id from memory_read" },
         match: { type: "string", description: "Text of the entry to update" },
         fact: { type: "string", description: "The corrected fact" },
+        anchors: { type: "array", items: { type: "string" }, description: `${anchorsDescription} Replaces the entry's anchors; an empty list removes them. Omit to keep (and re-confirm) the existing ones.` },
       }, ["fact"]),
       execute: async (args, context) => {
         const fact = String(args.fact ?? "").trim()
@@ -163,6 +206,8 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
         const directory = await host.directoryFor(context.sessionID)
         let updated = 0
         let resolvedConflict = false
+        let anchorError: string | undefined
+        if (args.anchors !== undefined && !Array.isArray(args.anchors)) return anchorsShapeError()
         await storeIO.withLock(async () => {
           const fresh = await storeIO.getStore()
           const visible = readableEntries(fresh, directory)
@@ -172,6 +217,19 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
               ? findSimilar(visible, String(args.match))
               : undefined
           if (target) {
+            let anchors: Anchor[] | undefined
+            if (Array.isArray(args.anchors) && args.anchors.length > 0) {
+              if (target.scope !== "project" || !directory) {
+                anchorError = "Anchors are only allowed on project-scoped facts; this entry is not project-scoped. Nothing was saved."
+                return
+              }
+              try {
+                anchors = await createAnchors(args.anchors, directory, now(), anchorCache)
+              } catch (error) {
+                anchorError = anchorMessage(error)
+                return
+              }
+            }
             target.text = fact
             target.weight = Math.min(4, target.weight + 0.5)
             target.lastSeen = now()
@@ -181,11 +239,15 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
               target.conflictAt = undefined
               resolvedConflict = true
             }
+            if (anchors) target.anchors = anchors
+            else if (Array.isArray(args.anchors) && target.scope === "project") target.anchors = undefined
+            else if (target.anchors?.length) target.anchors = await refreshAnchors(target.anchors, target.projectID, now(), anchorCache)
             updated = 1
           }
           fresh.updatedAt = now()
           await storeIO.writeStore(fresh)
         })
+        if (anchorError) return anchorError
         return updated ? `Updated: ${fact}${resolvedConflict ? " (conflict resolved)" : ""}` : "No matching entry found."
       },
     },
@@ -234,14 +296,21 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
           lines.push(`  Final rank: #${hit.rank}`)
         }
         lines.push(`Sensitivity: ${entry.sensitivity ?? "normal"}`)
+        if (entry.anchors?.length) {
+          const anchorState = await entryAnchorState(entry, anchorCache)
+          lines.push("Anchors:")
+          for (const check of anchorState.checks) {
+            lines.push(`  ${anchorLabel(check.anchor)} — ${check.state}${check.state === "fresh" ? "" : ` (${check.reason})`}, anchored ${new Date(check.anchor.anchoredAt).toISOString()}`)
+          }
+        }
         return lines.join("\n")
       },
     },
     {
       name: "memory_inspect",
-      description: "Inspect visible memory statistics, recent facts, conflicts, project facts, or the current session's surfacing breakdown.",
+      description: "Inspect visible memory statistics, recent facts, conflicts, project facts, or the current session's surfacing breakdown, or memories with stale code anchors.",
       input: objectSchema({
-        show: { type: "string", enum: ["stats", "recent", "conflicts", "project", "surfaced"], description: "View to show (default stats)" },
+        show: { type: "string", enum: ["stats", "recent", "conflicts", "project", "surfaced", "stale"], description: "View to show (default stats); stale lists code-anchored memories whose code changed (drifted) or disappeared (broken)" },
         limit: { type: "number", description: "Maximum entries in list views (default 10)" },
       }),
       execute: async (args, context) => {
@@ -285,6 +354,22 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
           const entries = visible.filter((entry) => entry.scope === "project" && entry.projectID === directory).slice(0, limit)
           output.push(`Project entries (directory: ${directory ?? "unknown"}) — ${entries.length}/${visible.filter((entry) => entry.scope === "project").length}:`)
           for (const entry of entries) output.push(`- [${entry.id}] (${entry.category}, ${entry.source}) ${entry.text}`)
+        } else if (show === "stale") {
+          const stale: { entry: Entry; state: string; reasons: string[] }[] = []
+          for (const entry of visible) {
+            if (!entry.anchors?.length) continue
+            const anchorState = await entryAnchorState(entry, anchorCache)
+            if (anchorState.state === "fresh") continue
+            stale.push({ entry, state: anchorState.state, reasons: anchorState.checks.filter((check) => check.state !== "fresh").map(describeCheck) })
+          }
+          if (stale.length === 0) output.push("No stale code anchors.")
+          else {
+            output.push(`${stale.length} memor${stale.length === 1 ? "y" : "ies"} with stale code anchors (re-confirm with memory_useful or memory_update, or memory_forget):`)
+            for (const item of stale.slice(0, limit)) {
+              output.push(`- [${item.entry.id}] (${item.state}) ${item.entry.text}`)
+              output.push(`  ${item.reasons.join("; ")}`)
+            }
+          }
         } else if (show === "surfaced") {
           const ranked = surface.lastSurface.get(context.sessionID)
           if (!ranked?.length) output.push("No memory surfaced for this session yet. Send a message to trigger retrieval.")
@@ -314,6 +399,8 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
           if (!readableEntries(fresh, directory).some((entry) => entry.id === args.id)) return
           ok = applyUsefulFeedback(fresh, String(args.id), now())
           if (ok) {
+            const entry = fresh.entries.find((candidate) => candidate.id === args.id)
+            if (entry?.anchors?.length) entry.anchors = await refreshAnchors(entry.anchors, entry.projectID, now(), anchorCache)
             fresh.updatedAt = now()
             await storeIO.writeStore(fresh)
           }

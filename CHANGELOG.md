@@ -5,6 +5,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0-alpha.2] — unreleased
+
+### Added
+
+- Code-anchored memories: `anchors` (`"path"` or `"path#symbol"`, max 3) on
+  `memory_write` and `memory_update` for project facts. Anchor state
+  (`fresh` / `drifted` / `broken`) is derived on demand from a content hash and
+  symbol check and never persisted. Drifted facts are surfaced with a
+  `(code changed since: …)` note; broken ones are left out of the automatic
+  block. New module `src/engine/anchors.ts`.
+- `memory_inspect({ show: "stale" })`, `[drifted]` / `[stale: …]` markers in
+  `memory_read`, and an `Anchors:` section in `memory_why`.
+- DREAM can anchor new project facts to files touched in the session and is
+  told about broken anchors (`anchor=broken(…)`); explicit entries stay protected.
+- `memory_write` (same text), `memory_update` and `memory_useful` re-anchor.
+
+### Security
+
+- Anchor paths are resolved with `realpath` and must stay inside the project;
+  traversal, absolute paths and escaping symlinks are rejected.
+
 ## [2.0.0-alpha.0] — unreleased
 
 ### Removed
