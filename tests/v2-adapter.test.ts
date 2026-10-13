@@ -63,6 +63,10 @@ test("V2 can disable both automatic processes", () => {
   })
 })
 
+test("V2 internal generation keeps tool definitions only for the OpenCode provider", () => {
+  runV2Check({ V2_CHECK_PROVIDER: "opencode" })
+})
+
 test("V2 completion event writes the mechanical handoff immediately", () => {
   runV2Check({ V2_CHECK_HANDOFF: "1" })
 })

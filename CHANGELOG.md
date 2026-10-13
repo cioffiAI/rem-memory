@@ -78,6 +78,15 @@ OpenCode V2. See the README for the 1.x upgrade guide.
 - Anchor paths are resolved with `realpath` and must stay inside the project;
   traversal, absolute paths and escaping symlinks are rejected.
 
+### Fixed
+
+- DREAM, semantic dedup and rerank work with OpenCode's free-tier models. The
+  top-level `ctx.generate.text()` used since 1.7.0 is rejected there ("can only
+  be used from within OpenCode"), so consolidation silently never ran; internal
+  generation now uses `ctx.session.generate()` with the system prompt and
+  conversation stripped (tool definitions kept only for the `opencode`
+  provider, never executed).
+
 ## [1.7.2] — 2026-09-30
 
 ### Added

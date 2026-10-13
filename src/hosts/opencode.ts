@@ -97,7 +97,7 @@ class V2MemoryRuntime {
         return session ? { directory: session.location.directory, title: session.title ?? undefined } satisfies SessionRef : undefined
       },
       directoryFor: (sessionID) => this.directoryFor(sessionID),
-      generate: async (prompt, opts) => this.generate(prompt, opts.sessionID ? await this.sessionInfo(opts.sessionID) : undefined, opts.timeoutMs),
+      generate: (prompt, opts) => this.generate(prompt, opts.sessionID, opts.timeoutMs),
       transcript: async (sessionID) => (await ctx.session.context({ sessionID })).map(normalizeMessage),
       lastUserText: async (sessionID) => {
         try {
@@ -149,6 +149,7 @@ class V2MemoryRuntime {
       if (missing.length > 0) throw new Error(`memory V2 tool registration incomplete: ${missing.join(", ")}`)
       this.log("info", `memory V2 tools registered (${MEMORY_TOOL_NAMES.length})`)
       if (this.config.command) await this.registerCommand()
+      if (this.config.dream || this.config.rerank) await this.registerInternalGenerateHook()
       if (this.config.surface) {
         this.registrations.push(await this.ctx.session.hook("context", async (event) => {
           try {
@@ -293,28 +294,67 @@ class V2MemoryRuntime {
     return session?.location.directory ?? this.ctx.location.directory
   }
 
-  // V2's top-level generate API is intentionally used for all internal model
-  // work. Its documented contract creates no session, invokes no tools and
-  // writes no history, so DREAM/rerank cannot gain filesystem or network
-  // capabilities and leave no helper sessions to delete.
-  private async generate(prompt: string, session?: SessionInfo, timeoutMs = 120_000): Promise<string> {
-    const request = session?.model ? { prompt, model: session.model } : { prompt }
+  // Internal model work (DREAM, dedup, rerank) runs through
+  // session.generate: OpenCode's free tier rejects the top-level
+  // generate.text ("can only be used from within OpenCode"). session.generate
+  // writes no history and never executes tool calls (verified against 2.0.18:
+  // a prompt demanding a write produced text only), but by default it sends
+  // the session's tools, system prompt and conversation. The generate hook
+  // below strips the system prompt and conversation from our own requests, and
+  // the tool definitions too, except on the OpenCode provider: its free tier
+  // rejects requests without them. Without a session (or on hosts lacking
+  // session.generate) generate.text remains the fallback.
+  private readonly internalPrompts = new Map<string, Set<string>>()
+
+  private isInternal(sessionID: string, lastMessage: unknown): boolean {
+    const pending = this.internalPrompts.get(sessionID)
+    if (!pending?.size) return false
+    const last = JSON.stringify(lastMessage ?? "")
+    for (const prompt of pending) {
+      if (last.includes(JSON.stringify(prompt.slice(0, 120)).slice(1, -1))) return true
+    }
+    return false
+  }
+
+  private async registerInternalGenerateHook() {
+    if (typeof this.ctx.session?.hook !== "function") return
+    this.registrations.push(await this.ctx.session.hook("generate", async (event) => {
+      if (!this.isInternal(String(event.sessionID), event.messages.at(-1))) return
+      if (event.model?.providerID !== "opencode") event.tools = {}
+      event.system.splice(0)
+      event.messages.splice(0, event.messages.length - 1)
+    }))
+  }
+
+  private async generate(prompt: string, sessionID?: string, timeoutMs = 120_000): Promise<string> {
     const controller = new AbortController()
     const dispose = () => controller.abort()
     if (this.controller.signal.aborted) controller.abort()
     else this.controller.signal.addEventListener("abort", dispose, { once: true })
     const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let pending: Set<string> | undefined
     try {
+      if (sessionID && typeof this.ctx.session?.generate === "function") {
+        pending = this.internalPrompts.get(sessionID) ?? new Set()
+        this.internalPrompts.set(sessionID, pending)
+        pending.add(prompt)
+        return (await this.ctx.session.generate({ sessionID, prompt } as never, { signal: controller.signal } as never)).text
+      }
+      const session = sessionID ? await this.sessionInfo(sessionID) : undefined
+      const request = session?.model ? { prompt, model: session.model } : { prompt }
       return (await this.ctx.generate.text(request, { signal: controller.signal })).text
     } catch (error) {
       if (controller.signal.aborted) return ""
       throw error
     } finally {
+      if (pending && sessionID) {
+        pending.delete(prompt)
+        if (pending.size === 0) this.internalPrompts.delete(sessionID)
+      }
       clearTimeout(timer)
       this.controller.signal.removeEventListener("abort", dispose)
     }
   }
-
 
   // command.execute does not query the model by itself: forward the
   // instructions (plus the user's arguments) as a prompt for that session.

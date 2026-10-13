@@ -440,12 +440,19 @@ Two limitations remain, by architecture rather than by omission:
 
 ## DREAM containment
 
-Consolidation, semantic dedup and semantic rerank use `ctx.generate.text()`.
-The V2 API performs an isolated text generation without creating a session,
-exposing tools, or writing conversation history. There are therefore no helper
-sessions to hide or garbage-collect. A periodic recovery pass uses the durable
-two-phase `inProgress` journal to retry interrupted consolidations after the
-configured timeout.
+Consolidation, semantic dedup and semantic rerank run through
+`ctx.session.generate()` on the finished session. It writes no conversation
+history and never executes tool calls: it returns text only (checked against
+OpenCode 2.0.18 with a prompt that demanded a file write; no file was written).
+rem-memory's own `generate` hook strips the session's system prompt and
+conversation from these requests, so the model sees only the internal prompt.
+Tool *definitions* are stripped too, except on the `opencode` provider, whose
+free tier rejects requests without them ("OpenCode's free tier can only be used
+from within OpenCode"); there they stay visible but cannot be executed. Without
+a session, `ctx.generate.text()` is used. No helper sessions are created, so
+there is nothing to hide or garbage-collect. A periodic recovery pass uses the
+durable two-phase `inProgress` journal to retry interrupted consolidations
+after the configured timeout.
 
 ## Upgrading from opencode-memory 1.x
 
@@ -480,6 +487,10 @@ rem-memory 2.0 is the next major version of `@cioffi_ai/opencode-memory`
    `handoffKeep`, `handoffMaxChars` and `command`. See
    [Code-anchored memories](#code-anchored-memories) and
    [Session handoff](#session-handoff).
+8. **Old local plugin folders.** OpenCode loads every directory in
+   `~/.config/opencode/plugins/` automatically, even when it is not listed in
+   your configuration. If you kept a local copy of the 1.x plugin there, move
+   it out, otherwise two memory plugins run side by side.
 
 **Store format and going back.** 2.0 writes store schema version 3 (additive:
 `anchors` on entries, `handoffs` on the store). 2.0 reads 1.x stores

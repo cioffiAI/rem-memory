@@ -46,7 +46,28 @@ const ctx = {
     hook: async (name, callback) => {
       if (failSetup) throw new Error("simulated hook registration failure")
       hooks[name] = callback
-      return { dispose: async () => { disposed.push("context") } }
+      return { dispose: async () => { disposed.push(name) } }
+    },
+    // Mirrors OpenCode: session.generate sends the session's tools, system
+    // prompt and conversation unless the plugin's generate hook strips them.
+    generate: async ({ sessionID: id, prompt }) => {
+      const provider = process.env.V2_CHECK_PROVIDER ?? "test"
+      const request = {
+        sessionID: id,
+        model: { providerID: provider, id: "test" },
+        tools: { edit: { description: "edit", input: {} }, shell: { description: "shell", input: {} } },
+        system: [{ type: "text", text: "SESSION SYSTEM PROMPT" }],
+        messages: [{ role: "user", content: "earlier conversation" }, { role: "user", content: prompt }],
+      }
+      if (!hooks.generate) throw new Error("internal generation ran without the stripping hook")
+      await hooks.generate(request)
+      // OpenCode's free tier needs the definitions (never executed by session.generate).
+      if (provider === "opencode" ? Object.keys(request.tools).length === 0 : Object.keys(request.tools).length !== 0) {
+        throw new Error(`internal generation tool definitions wrong for provider ${provider}`)
+      }
+      if (request.system.length !== 0) throw new Error("internal generation kept the session system prompt")
+      if (request.messages.length !== 1 || request.messages[0].content !== prompt) throw new Error("internal generation kept the conversation")
+      return ctx.generate.text({ prompt })
     },
     get: async ({ sessionID: id }) => ({
       id,
@@ -204,7 +225,7 @@ if (hooks.context) {
 
 await cleanup?.()
 await cleanup?.()
-const expectedDisposed = surfaceDisabled ? '["tools"]' : '["context","tools"]'
+const expectedDisposed = JSON.stringify([...(surfaceDisabled ? [] : ["context"]), ...(dreamDisabled ? [] : ["generate"]), "tools"])
 if (JSON.stringify(disposed) !== expectedDisposed) throw new Error("cleanup must dispose registrations exactly once in reverse order")
 if (foreignReads !== 0) throw new Error("a completion event from another project reached consolidation")
 console.log("V2_CHECK_OK")
