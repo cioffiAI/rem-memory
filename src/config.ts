@@ -45,6 +45,7 @@ const OPTION_ENV = {
   rerankCacheMs: "REM_MEMORY_RERANK_CACHE_MS",
   coreSlot: "REM_MEMORY_CORE_SLOT",
   surfaceRefreshMs: "REM_MEMORY_SURFACE_REFRESH_MS",
+  command: "REM_MEMORY_COMMAND",
   handoff: "REM_MEMORY_HANDOFF",
   handoffMaxAgeHours: "REM_MEMORY_HANDOFF_MAX_AGE_HOURS",
   handoffKeep: "REM_MEMORY_HANDOFF_KEEP",
@@ -73,6 +74,7 @@ export type MemoryConfig = {
   rerankCacheMs: number
   coreSlot: number
   surfaceRefreshMs: number
+  command: boolean
   handoff: boolean
   handoffMaxAgeHours: number
   handoffKeep: number
@@ -185,6 +187,7 @@ export function resolveConfig(
     rerankCacheMs: integer("rerankCacheMs", 60 * 1000, 0),
     coreSlot: integer("coreSlot", 3, 0),
     surfaceRefreshMs: integer("surfaceRefreshMs", 15 * 60 * 1000, 0),
+    command: boolean("command", true),
     handoff: boolean("handoff", true),
     handoffMaxAgeHours: integer("handoffMaxAgeHours", 72, 1),
     handoffKeep: integer("handoffKeep", 3, 1),

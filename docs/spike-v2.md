@@ -156,3 +156,14 @@ Implication PR1: `server.js` and `exports["./server"]` can be removed once `src/
 ## Correction (2026-10-13, after the spike)
 
 Q7 is wrong as stated. The test plugins all had a root `index.js`, which is what OpenCode 2.0.18 actually resolves. With the entry only in `dist/index.js`, OpenCode does not even attempt to load a local package directory (no "loading plugin" log line), regardless of `main`/`exports`. A root `server.js` or `index.js` re-exporting the build is required, so `server.js` and the `./server` export stay. Confirmed with `verify:runtime` against the real CLI.
+
+## Addendum (PR 5): native /memory command, verified on OpenCode 2.0.18
+
+- `ctx.command.transform` + `editor.add({ name: "memory", ... })` registers a bare `memory` command. `execute` receives
+  `{sessionID, prompt:{text}, delivery}` and queries nothing by itself. Calling `ctx.session.prompt({ sessionID, text, delivery })`
+  from inside `execute` works: the mock model receives the prompt (flat input shape, `text` is a string, `delivery` is `"steer" | "queue"`).
+  `POST /api/session/{id}/command {name, text}` returns 204 with an empty body. Covered by `scripts/verify-runtime.ts`.
+- Plugin command AND user file command both named `memory` (file at `<config>/opencode/commands/memory.md`, and separately at
+  `<project>/.opencode/commands/memory.md`): no error, no log line. `GET /api/command` lists ONE `memory` entry, with the file's
+  description, and invoking it sends the FILE's template to the model; the plugin's `execute` is never run. So the user file wins silently.
+  Hence the `command` option (default true) to skip the registration.

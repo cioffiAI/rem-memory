@@ -5,7 +5,7 @@
 Local-first persistent memory for OpenCode (V2).
 
 > rem-memory is the successor of `@cioffi_ai/opencode-memory`. Version 2 supports
-> OpenCode V2 only; see [Upgrading](#upgrading-from-cioffi_aiopencode-memory).
+> OpenCode V2 only; see [Upgrading from opencode-memory 1.x](#upgrading-from-opencode-memory-1x).
 
 rem-memory gives OpenCode durable memory across sessions through a
 WRITE → DREAM → SURFACE lifecycle:
@@ -13,6 +13,18 @@ WRITE → DREAM → SURFACE lifecycle:
 - WRITE: explicit memory tools
 - DREAM: headless conversation consolidation
 - SURFACE: selective memory injection into future prompts
+
+What sets it apart is that it is built to be checked and built for coding:
+
+- **Auditable**: every memory records where it came from (explicit write or the
+  session, messages and confidence of a dreamed fact), `memory_why` explains
+  its ranking, and contradictions are flagged instead of silently overwritten.
+- **Local-first**: plain JSON on your disk, no database, no cloud service;
+  `local-only` facts never reach the model (see [Privacy](#privacy)).
+- **Coding-specific**: [code-anchored memories](#code-anchored-memories) notice
+  when the file or symbol they describe changes or disappears, and a
+  [session handoff](#session-handoff) tells the next session in the same
+  project where you left off.
 
 ## Features
 
@@ -82,21 +94,21 @@ tools need not appear as ten standalone model tool definitions.
 OpenCode installs npm plugins automatically via Bun on startup and caches them
 in `~/.cache/opencode/node_modules/`. Restart OpenCode after adding the entry.
 
-### Optional: `/memory` command
+### The `/memory` command
 
-The npm package does not copy `commands/memory.md` into your user directory
-(plugin package installs do not run lifecycle scripts). To enable the `/memory`
-command, copy it manually from this repository:
+The plugin registers a native `/memory` command (read, remember, update,
+forget, `stats`, `conflicts`, `resume`, ...); there is nothing to copy. The
+instructions it sends to the model are those of
+[`commands/memory.md`](commands/memory.md), embedded at build time, followed
+by whatever you type after `/memory`.
 
-```bash
-mkdir -p ~/.config/opencode/commands
-
-curl -o ~/.config/opencode/commands/memory.md \
-  https://raw.githubusercontent.com/cioffiAI/rem-memory/main/commands/memory.md
-```
-
-The plugin works without `/memory`: the tools are registered directly by the
-plugin, and the automatic DREAM cycle runs regardless.
+If you already keep your own `~/.config/opencode/commands/memory.md` (or a
+project `.opencode/commands/memory.md`), that file **takes precedence**:
+OpenCode 2.0.18 lists a single `memory` command, the one from the file, and
+silently ignores the plugin's (no error, no warning; verified against the real
+CLI). To avoid registering a command that can never run, set the option
+`command: false` (or `REM_MEMORY_COMMAND=0`). The memory tools and the
+automatic DREAM cycle work the same either way.
 
 ## Tools
 
@@ -268,6 +280,7 @@ with the offending name instead of silently falling back.
 | `rerankCacheMs` | `REM_MEMORY_RERANK_CACHE_MS` | 60000 | Rerank cache lifetime. |
 | `coreSlot` | `REM_MEMORY_CORE_SLOT` | 3 | Core-tier entries injected beyond relevance matches. |
 | `surfaceRefreshMs` | `REM_MEMORY_SURFACE_REFRESH_MS` | 900000 | Minimum interval between persisted exposure updates. |
+| `command` | `REM_MEMORY_COMMAND` | true | Register the native `/memory` command. Set `false` if you keep your own `memory.md` command file. |
 | `handoff` | `REM_MEMORY_HANDOFF` | true | Session handoff: mechanical write, DREAM enrichment and first-request injection. `false` disables all three; `memory_handoff` still reads existing data. |
 | `handoffMaxAgeHours` | `REM_MEMORY_HANDOFF_MAX_AGE_HOURS` | 72 | Older handoffs are no longer injected (still listed by `memory_handoff`). |
 | `handoffKeep` | `REM_MEMORY_HANDOFF_KEEP` | 3 | Handoffs kept per project (newest first); 50 overall. |
@@ -434,21 +447,54 @@ sessions to hide or garbage-collect. A periodic recovery pass uses the durable
 two-phase `inProgress` journal to retry interrupted consolidations after the
 configured timeout.
 
-## Upgrading from `@cioffi_ai/opencode-memory`
+## Upgrading from opencode-memory 1.x
 
-1. Replace `"@cioffi_ai/opencode-memory"` with `"rem-memory"` in the `plugins`
-   array of your OpenCode V2 configuration (V1 `plugin` entries are no longer
-   supported).
-2. Optionally rename `OPENCODE_MEMORY_*` variables to `REM_MEMORY_*`; the old
-   names keep working with a deprecation warning.
-3. Remove `gcChildAgeMs` from your options if you set it; it is ignored.
-4. Your existing store is copied automatically on first start unless you set
-   `dir` explicitly (see [Configuration](#configuration)).
+rem-memory 2.0 is the next major version of `@cioffi_ai/opencode-memory`
+(1.x), published under a new name and for OpenCode V2 only.
+
+1. **Package name.** In the `plugins` array of your OpenCode configuration
+   replace `"@cioffi_ai/opencode-memory"` with `"rem-memory"` (or, with
+   options, `"package": "rem-memory"`).
+2. **OpenCode V1 is no longer supported.** The V1 adapter was removed. If you
+   still run OpenCode V1, stay on `@cioffi_ai/opencode-memory` 1.x.
+3. **Environment variables.** `OPENCODE_MEMORY_*` became `REM_MEMORY_*` (same
+   suffixes). The old names still work as a fallback and log one deprecation
+   warning per process; when both are set, `REM_MEMORY_*` wins.
+4. **Data directory.** The default moved from `~/.local/share/opencode/memory`
+   to `~/.local/share/rem-memory`. On first start, if you did not set `dir`
+   (option or environment) and the new directory has no `store.json`, the
+   plugin copies `store.json`, `state.json` and `SUMMARY.md` there and leaves a
+   `MIGRATED_TO_REM_MEMORY` marker in the old directory. The old directory is
+   never modified or deleted. If you set `dir` explicitly nothing is migrated:
+   2.0 simply opens that directory.
+5. **Removed option.** `gcChildAgeMs` (and `REM_MEMORY_GC_CHILD_AGE_MS`) is
+   accepted but ignored, with a warning: 2.0 creates no helper sessions to
+   garbage-collect. Remove it from your configuration.
+6. **The `/memory` command is now built in.** Delete the manual
+   `commands/memory.md` copy to use the plugin's, or keep it and set
+   `command: false` (a file command wins over the plugin's anyway; see
+   [The `/memory` command](#the-memory-command)).
+7. **New in 2.0.** Tools and options: `anchors` on `memory_write` /
+   `memory_update`, `memory_inspect({ show: "stale" })`, the `memory_handoff`
+   tool (ten tools in total), and the options `handoff`, `handoffMaxAgeHours`,
+   `handoffKeep`, `handoffMaxChars` and `command`. See
+   [Code-anchored memories](#code-anchored-memories) and
+   [Session handoff](#session-handoff).
+
+**Store format and going back.** 2.0 writes store schema version 3 (additive:
+`anchors` on entries, `handoffs` on the store). 2.0 reads 1.x stores
+(versions 1 and 2) and upgrades them to 3. The reverse does not
+hold: 1.x only accepts versions 1 and 2 and treats anything else as an empty
+store, so a 1.x process pointed at a directory written by 2.0 sees no memories
+and its next write can replace the file. With the default directories this cannot
+happen (1.x keeps using the untouched old directory, so you can roll back and
+simply lose what 2.0 learned), but do not share an explicit `dir` between 1.x
+and 2.0, and back up `store.json` before trying 2.0 on a shared directory.
 
 ## Roadmap
 
-- **2.0**: shared / agent-scoped memory, graph memory with entity
-  relationships, encrypted multi-device sync, import/export.
+- **2.1+**: reuse the host-neutral engine from other agents (MCP server /
+  Claude Code adapter).
 
 ## Development
 
@@ -469,8 +515,8 @@ OPENCODE_TEST_BIN_V2=/path/to/opencode-v2 bun run verify:package
 
 The runtime check uses a temporary profile and a deterministic model served on
 localhost; no AI credentials or paid model calls are needed. It checks
-loading, all ten tool registrations, write/read, context injection, automatic
-DREAM, store migration and local-only privacy. Logs and request evidence stay in
+loading, all ten tool registrations, the native `/memory` command, write/read,
+context injection, automatic DREAM, store migration and local-only privacy. Logs and request evidence stay in
 the printed temporary directory. The default unit test suite does not replace
 this opt-in runtime check.
 

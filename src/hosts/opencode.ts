@@ -1,5 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 import { isDirExplicit, resolveConfig, type MemoryConfig } from "../config.ts"
+import { buildCommandPrompt, COMMAND_DESCRIPTION, COMMAND_NAME } from "../engine/command.ts"
 import { consolidate } from "../engine/dream.ts"
 import { writeMechanicalHandoff } from "../engine/handoff.ts"
 import type { ChangedFile, Host, LogLevel, SessionRef, TranscriptMessage } from "../engine/host.ts"
@@ -147,6 +148,7 @@ class V2MemoryRuntime {
       const missing = MEMORY_TOOL_NAMES.filter((name) => !registered.has(name))
       if (missing.length > 0) throw new Error(`memory V2 tool registration incomplete: ${missing.join(", ")}`)
       this.log("info", `memory V2 tools registered (${MEMORY_TOOL_NAMES.length})`)
+      if (this.config.command) await this.registerCommand()
       if (this.config.surface) {
         this.registrations.push(await this.ctx.session.hook("context", async (event) => {
           try {
@@ -313,6 +315,26 @@ class V2MemoryRuntime {
     }
   }
 
+
+  // command.execute does not query the model by itself: forward the
+  // instructions (plus the user's arguments) as a prompt for that session.
+  private async registerCommand() {
+    // Older/partial hosts may not expose the command domain; tools still work.
+    if (!this.ctx.command) return
+    this.registrations.push(await this.ctx.command.transform((editor) => {
+      editor.add({
+        name: COMMAND_NAME,
+        description: COMMAND_DESCRIPTION,
+        execute: async (invocation) => {
+          await this.ctx.session.prompt({
+            sessionID: String(invocation.sessionID),
+            text: buildCommandPrompt(invocation.prompt.text),
+            delivery: invocation.delivery,
+          })
+        },
+      })
+    }))
+  }
 
   private async registerTools() {
     const tools = createTools(this.deps, this.surface)

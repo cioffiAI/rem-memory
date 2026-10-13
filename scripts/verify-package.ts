@@ -113,6 +113,7 @@ async function verifyControls(call, dir) {
 }
 const v2Tools = []
 const hooks = {}
+const commands = []
 const subscribe = async function* ({ signal } = {}) {
   if (signal?.aborted) return
   await new Promise((resolve) => signal?.addEventListener("abort", resolve, { once: true }))
@@ -142,6 +143,12 @@ const v2ctx = {
       location: { directory: process.cwd() },
     }),
     context: async () => [{ id: "m1", type: "user", text: "coffee morning", time: { created: Date.now() } }],
+  },
+  command: {
+    transform: async (callback) => {
+      callback({ add: (definition) => commands.push(definition) })
+      return { dispose: async () => {} }
+    },
   },
   event: { subscribe },
   generate: { text: async () => ({ text: '{"new":[],"summary":""}' }) },
@@ -176,8 +183,12 @@ if (!event.system.some((part) => part.type === "text" && part.text.includes("<me
   console.error("FAIL: V2 context hook did not inject memory")
   process.exit(1)
 }
+if (commands.map((command) => command.name).join() !== "memory") {
+  console.error("FAIL: native /memory command was not registered")
+  process.exit(1)
+}
 await cleanup?.()
-console.log("OK V2: " + v2Names.length + " tools, migration/read/write/context, parallel writes, summary controls, cleanup")
+console.log("OK V2: " + v2Names.length + " tools, /memory command, migration/read/write/context, parallel writes, summary controls, cleanup")
 `
 
 const artifactsDir = mkdtempSync(join(tmpdir(), "rem-memory-artifacts-"))

@@ -84,6 +84,7 @@ async function api(path: string, data?: unknown): Promise<any> {
   })
   const text = await response.text()
   if (!response.ok) throw new Error(`${path}: ${response.status} ${text.slice(0,1000)}`)
+  if (!text) return undefined
   const value = JSON.parse(text)
   return value && typeof value === "object" && "data" in value ? value.data : value
 }
@@ -154,6 +155,17 @@ try {
   if (JSON.stringify(store().entries.map((entry: any) => entry.id).sort()) !== JSON.stringify(saved.entries.map((entry: any) => entry.id).sort())) {
     throw new Error("summary-only clear lost facts")
   }
+  // Native /memory command: executing it must make the model receive the
+  // instructions of commands/memory.md followed by the user's arguments.
+  if (!(await api("/api/command")).some((command: any) => command.name === "memory")) throw new Error("/memory command not registered")
+  const beforeCommand = model.requests.length
+  await api(`${prefix}/command`, { name: "memory", text: "stats" })
+  await until(() => model.requests.slice(beforeCommand).some((request) => {
+    const text = JSON.stringify(request.messages)
+    return text.includes("memory_handoff") && text.includes("User request: stats")
+  }), "/memory command prompt reached the model")
+  await until(async () => (await api(`${prefix}/context`)).at(-1)?.type === "idle", "session idle after command")
+  console.log("OK: native /memory command forwards its instructions and arguments to the model")
   console.log(`OK: parallel writes through Code Mode Promise.all, summary-only clear${disableSummary ? ", summary hidden and DREAM summary disabled" : ""}`)
   console.log(disableAutomatic
     ? `OK: real CLI load, ten tools, write/read, DREAM and SURFACE disabled${configOptions ? " through opencode.jsonc" : ""}, migration, local-only privacy`

@@ -45,7 +45,7 @@ test("every environment setting can be supplied through plugin options", () => {
     gcChildAgeMs: 0, inProgressTimeoutMs: 1, rerank: true,
     rerankCandidates: 1, rerankTimeoutMs: 1, rerankCacheMs: 0,
     coreSlot: 0, surfaceRefreshMs: 0,
-    handoff: false, handoffMaxAgeHours: 1, handoffKeep: 1, handoffMaxChars: 100,
+    command: false, handoff: false, handoffMaxAgeHours: 1, handoffKeep: 1, handoffMaxChars: 100,
   }
   const { gcChildAgeMs: _ignored, ...effective } = options
   expect(resolveConfig(options, {})).toEqual(effective)
@@ -59,6 +59,13 @@ test("invalid options fail at setup with the offending name", () => {
   expect(() => resolveConfig({ rerankTimeoutMs: Infinity }, {})).toThrow("rerankTimeoutMs")
   expect(() => resolveConfig({ dir: "" }, {})).toThrow("dir")
   expect(() => resolveConfig({ dir: "relative/path" }, {})).toThrow("absolute")
+})
+
+test("the native command is on by default and can be switched off by option or environment", () => {
+  expect(resolveConfig({}, {}).command).toBe(true)
+  expect(resolveConfig({}, { REM_MEMORY_COMMAND: "0" }).command).toBe(false)
+  expect(resolveConfig({ command: false }, { REM_MEMORY_COMMAND: "1" }).command).toBe(false)
+  expect(() => resolveConfig({ command: "no" }, {})).toThrow("command")
 })
 
 test("summary is enabled by default and accepts a strict environment switch", () => {
