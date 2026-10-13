@@ -157,7 +157,7 @@ if (!String(result.content).includes("coffee in the morning")) {
 }
 await verifyControls(async (name, args) => (await v2Tools.find((tool) => tool.name === name).execute(args, toolContext)).content, memoryDir)
 const migrated = JSON.parse(readFileSync(memoryDir + "/store.json", "utf8"))
-if (migrated.version !== 2 || migrated.entries.find((entry) => entry.id === "legacy-1")?.tier !== "core") {
+if (migrated.version !== 3 || migrated.entries.find((entry) => entry.id === "legacy-1")?.tier !== "core") {
   console.error("FAIL: installed package did not migrate the v1 store schema to v2")
   process.exit(1)
 }

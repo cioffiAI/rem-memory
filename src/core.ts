@@ -41,16 +41,38 @@ export type Entry = {
   // recorded separately and feeds statistics only (never the score).
   lastSurfaced?: number
   surfacedCount?: number
+  // Code anchors (v3): files/symbols this fact is about.
+  anchors?: Anchor[]
   // Privacy (v2): local-only facts are stored on disk only; they never reach
   // any model-visible path (see readableEntries / consolidationEntries).
   sensitivity?: "normal" | "private" | "local-only"
 }
 
+// Code anchor (v3): ties a project fact to a file (and optionally a symbol).
+export type Anchor = { path: string; symbol?: string; hash: string; anchoredAt: number }
+
+// Session handoff (v3): a "where we left off" note for the next session.
+export type Handoff = {
+  id: string
+  projectID: string
+  sessionID: string
+  origin: { host: "opencode"; agent?: string }
+  createdAt: number
+  updatedAt: number
+  branch?: string
+  request?: string
+  files: { path: string; status: string }[]
+  narrative?: string
+  level: "mechanical" | "enriched"
+  dismissedAt?: number
+}
+
 export type Store = {
-  version: 2
+  version: 3
   summary: string
   updatedAt: number
   entries: Entry[]
+  handoffs: Handoff[]
 }
 
 export const DAY = 24 * 60 * 60 * 1000
@@ -61,16 +83,17 @@ export const DAY = 24 * 60 * 60 * 1000
 export const CATEGORIES = ["user", "project", "workflow", "preferences", "decisions", "status", "environment", "other"]
 
 export function emptyStore(): Store {
-  return { version: 2, summary: "", updatedAt: 0, entries: [] }
+  return { version: 3, summary: "", updatedAt: 0, entries: [], handoffs: [] }
 }
 
-// Legacy stores (version 1) are migrated in place: unknown categories fall
+// Legacy stores (version 1 and 2) are migrated in place (to 3, additively): unknown categories fall
 // back to "other", and each entry gets its tier, status and sensitivity
 // defaults derived from what v1 already encoded.
 export function normalizeStore(store: Store): Store {
   const v = (store as { version?: unknown }).version
-  if (v !== 1 && v !== 2) return emptyStore()
-  store.version = 2
+  if (v !== 1 && v !== 2 && v !== 3) return emptyStore()
+  store.version = 3
+  if (!Array.isArray(store.handoffs)) store.handoffs = []
   for (const e of store.entries) {
     if (e.category === "general" || !CATEGORIES.includes(e.category)) e.category = "other"
     if (!e.tier) e.tier = CORE_CATEGORIES.has(e.category) ? "core" : "archival"

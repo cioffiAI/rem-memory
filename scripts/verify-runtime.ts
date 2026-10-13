@@ -130,7 +130,7 @@ try {
   for (const fact of ["The user prefers that repositories be useful and non-wordy.", "The user prefers concise responses."]) {
     if (!saved.entries.some((entry: any) => entry.text === fact)) throw new Error(`parallel write lost: ${fact}`)
   }
-  if (saved.version !== 2 || saved.entries.find((entry: any) => entry.id === "legacy")?.tier !== "core") throw new Error("store migration lost legacy data")
+  if (saved.version !== 3 || saved.entries.find((entry: any) => entry.id === "legacy")?.tier !== "core") throw new Error("store migration lost legacy data")
   const allRequests = JSON.stringify(model.requests)
   const injectedMemory = model.requests.some((request) => request.messages.some((message: any) =>
     message.role === "system" && JSON.stringify(message).includes("<memory>")))

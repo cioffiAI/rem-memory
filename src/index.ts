@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { setupV2 } from "./v2.ts"
+import { setupV2 } from "./hosts/opencode.ts"
 
 // OpenCode validates and calls id + setup().
 export default Plugin.define({

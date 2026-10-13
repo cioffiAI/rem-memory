@@ -69,7 +69,7 @@ describe("v1 → v2 migration", () => {
       ],
     } as never
     const out = normalizeStore(v1)
-    expect(out.version).toBe(2)
+    expect(out.version).toBe(3)
     expect(out.entries[0].tier).toBe("core") // preferences
     expect(out.entries[0].status).toBe("ACTIVE")
     expect(out.entries[0].sensitivity).toBe("normal")
