@@ -5,10 +5,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./server": "./server.js"
   },
   "files": [
     "dist",
+    "server.js",
     "commands",
     "README.md",
     "LICENSE"

@@ -60,7 +60,10 @@ Risultati completi in `docs/spike-v2.md`. Conseguenze sul piano:
 - **`command.transform`**: funziona; `execute` riceve `{sessionID, prompt:{text}}`
   e non interroga il modello da solo → il `/memory` nativo deve chiamare
   `ctx.session.prompt` (non ancora verificato).
-- **`server.js` / `./server`**: non servono → rimossi nella PR 1.
+- **`server.js` / `./server`**: **servono.** La conclusione iniziale dello spike era sbagliata
+  (i plugin di prova avevano un `index.js` alla radice). Verificato il 2026-10-13: OpenCode
+  2.0.18 carica una directory di pacchetto locale solo tramite `server.js` o `index.js` alla
+  radice e ignora `main`/`exports`. `server.js` resta.
 - **Limite noto**: il plugin è inizializzato per la directory di avvio del
   server; sessioni in altre directory non sono state verificate.
 

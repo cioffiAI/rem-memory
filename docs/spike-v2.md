@@ -151,3 +151,8 @@ Implication PR1: `server.js` and `exports["./server"]` can be removed once `src/
 - `@opencode/plugin` must be resolvable from the plugin dir (I symlinked the repo's node_modules); the runtime does not inject it.
 - Setup ctx keys: app, location, options, agent, aisdk, command, event, experimental, generate, model, provider, integration, mcp, permission, plugin, reference, rpc, skill, storage, tool, vcs, websearch, worktree, session, shell.
 - Plugin cleanup fn was called on server shutdown.
+
+
+## Correction (2026-10-13, after the spike)
+
+Q7 is wrong as stated. The test plugins all had a root `index.js`, which is what OpenCode 2.0.18 actually resolves. With the entry only in `dist/index.js`, OpenCode does not even attempt to load a local package directory (no "loading plugin" log line), regardless of `main`/`exports`. A root `server.js` or `index.js` re-exporting the build is required, so `server.js` and the `./server` export stay. Confirmed with `verify:runtime` against the real CLI.
