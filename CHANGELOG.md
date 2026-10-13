@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-10-13
+
+Final 1.x release. The package continues as [`rem-memory`](https://www.npmjs.com/package/rem-memory) 2.0.
+
+### Fixed
+
+- A store written by rem-memory 2.x (schema version 3 or later) is no longer
+  read as an empty store, which let the next write overwrite every fact. 1.x now
+  refuses to read or write it and reports an error instead.
+
 ## [1.7.2] — 2026-09-30
 
 ### Added

@@ -69,6 +69,11 @@ export function emptyStore(): Store {
 // defaults derived from what v1 already encoded.
 export function normalizeStore(store: Store): Store {
   const v = (store as { version?: unknown }).version
+  // A store written by rem-memory 2.x (schema 3+) must never be read as empty:
+  // the next write would overwrite every fact. Refuse instead.
+  if (typeof v === "number" && v > 2) {
+    throw new Error(`memory store schema ${v} was written by rem-memory 2.x; opencode-memory 1.x cannot read it and will not overwrite it. Upgrade to rem-memory or set a different memory dir.`)
+  }
   if (v !== 1 && v !== 2) return emptyStore()
   store.version = 2
   for (const e of store.entries) {

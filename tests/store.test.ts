@@ -51,8 +51,8 @@ describe("normalizeStore", () => {
     expect(out.entries[0].category).toBe("workflow")
   })
 
-  test("rejects unsupported store versions", () => {
-    const store = { ...emptyStore(), version: 99 } as never
+  test("treats a store without a valid version as empty", () => {
+    const store = { ...emptyStore(), version: "x" } as never
     expect(normalizeStore(store)).toEqual(emptyStore())
   })
 })
@@ -282,5 +282,12 @@ describe("coreSlot", () => {
     ]
     const picked = coreSlot(store, undefined, new Set(["c1"]), t, 3).map((e) => e.id)
     expect(picked).toEqual(["c2"])
+  })
+})
+
+describe("forward compatibility", () => {
+  test("refuses a store written by rem-memory 2.x instead of reading it as empty", () => {
+    const v3 = { version: 3, summary: "s", updatedAt: 1, entries: [], handoffs: [] } as unknown as Parameters<typeof normalizeStore>[0]
+    expect(() => normalizeStore(v3)).toThrow(/rem-memory 2\.x/)
   })
 })

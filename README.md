@@ -1,5 +1,9 @@
 # opencode-memory
 
+> **This package is deprecated.** It continues as [`rem-memory`](https://github.com/cioffiAI/rem-memory) 2.0 (OpenCode V2 only).
+> See its [upgrade guide](https://github.com/cioffiAI/rem-memory#upgrading-from-opencode-memory-1x).
+> 1.7.3 is the final 1.x release; stay on it only if you still run OpenCode V1.
+
 <video src="https://github.com/user-attachments/assets/b3b06cb6-0b63-4b18-a401-37964fe9e322" controls muted></video>
 
 Local-first persistent memory for OpenCode.
