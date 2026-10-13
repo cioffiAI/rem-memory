@@ -5,7 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [2.0.0] — unreleased
+## [2.0.0] — 2026-10-13
 
 rem-memory is the successor of `@cioffi_ai/opencode-memory`, rebuilt for
 OpenCode V2. See the README for the 1.x upgrade guide.
