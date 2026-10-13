@@ -15,7 +15,7 @@ test("keeps opencode.jsonc options and store paths separate per instance", async
     const tools = []
     const hooks = {}
     const ctx = {
-      options: { dir, dream: false, surface },
+      options: { dir, dream: false, handoff: false, surface },
       location: { directory },
       tool: {
         transform: async (callback) => {

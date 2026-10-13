@@ -14,6 +14,7 @@ const failSetup = process.env.V2_CHECK_FAIL_SETUP === "1"
 const dreamDisabled = process.env.V2_CHECK_DREAM_DISABLED === "1"
 const surfaceDisabled = process.env.V2_CHECK_SURFACE_DISABLED === "1"
 const summaryDisabled = process.env.REM_MEMORY_SUMMARY === "0"
+const handoffCheck = process.env.V2_CHECK_HANDOFF === "1"
 const eventType = process.env.V2_CHECK_EVENT ?? "session.execution.succeeded"
 
 const contextMessages = [
@@ -24,6 +25,7 @@ const contextMessages = [
     agent: "build",
     model: { providerID: "test", id: "test" },
     content: [{ type: "text", text: "Understood." }],
+    ...(handoffCheck || process.env.V2_CHECK_SNAPSHOT === "1" ? { snapshot: { start: "a", end: "b", files: ["src/a.ts"] } } : {}),
     time: { created: 101, completed: 102 },
   },
   { id: "idle-1", type: "idle", outcome: "succeeded", time: { created: 103 } },
@@ -119,7 +121,7 @@ if (failSetup) {
 }
 
 const cleanup = await plugin.setup(ctx)
-if (tools.length !== 9) throw new Error(`expected 9 V2 tools, got ${tools.length}`)
+if (tools.length !== 10) throw new Error(`expected 10 V2 tools, got ${tools.length}`)
 if (surfaceDisabled === Boolean(hooks.context)) throw new Error("SURFACE hook registration does not match configuration")
 
 const storePath = `${process.env.REM_MEMORY_DIR}/store.json`
@@ -147,6 +149,23 @@ if (dreamDisabled) {
   if (generateCalls !== 1) throw new Error(`expected one tool-free generate call, got ${generateCalls}`)
   if (summaryDisabled && store.summary) throw new Error("DREAM stored a summary while disabled")
   if (!summaryDisabled && !store.summary) throw new Error("enabled DREAM did not store its summary")
+}
+
+if (handoffCheck) {
+  let handoffs = []
+  for (let attempt = 0; attempt < 100 && handoffs.length === 0; attempt++) {
+    try { handoffs = JSON.parse(await readFile(storePath, "utf8")).handoffs ?? [] } catch {}
+    if (handoffs.length === 0) await Bun.sleep(10)
+  }
+  const [handoff] = handoffs
+  if (handoffs.length !== 1 || handoff.sessionID !== sessionID || handoff.projectID !== directory) throw new Error("completion event did not write exactly one mechanical handoff")
+  if (handoff.level !== "mechanical" || handoff.request !== "I prefer teal terminal themes.") throw new Error("mechanical handoff has the wrong level or request")
+  if (JSON.stringify(handoff.files) !== JSON.stringify([{ path: "src/a.ts", status: "modified" }])) throw new Error("mechanical handoff lost the touched files")
+  const show = tools.find((tool) => tool.name === "memory_handoff")
+  if (!String((await show.execute({ action: "show" }, { sessionID, agent: "build", messageID: "m", id: "c", signal: new AbortController().signal, progress: async () => {} })).content).includes("src/a.ts")) throw new Error("memory_handoff show did not return the handoff")
+} else {
+  const stored = JSON.parse(await readFile(storePath, "utf8").catch(() => "{}"))
+  if ((stored.handoffs ?? []).length !== 0) throw new Error("a trivial session produced a handoff")
 }
 
 const toolContext = {

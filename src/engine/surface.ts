@@ -13,10 +13,16 @@ import {
   score,
   type RankedMemory,
 } from "../core.ts"
+import { isFirstRequest, renderSurfaceHandoff, surfaceCandidate } from "./handoff.ts"
 import type { EngineDeps } from "./host.ts"
 
 type RerankCacheEntry = { at: number; order: string[]; abstain?: boolean }
-type SurfaceState = { lastSurface: Map<string, RankedMemory[]>; rerankCache: Map<string, RerankCacheEntry> }
+type SurfaceState = {
+  lastSurface: Map<string, RankedMemory[]>
+  rerankCache: Map<string, RerankCacheEntry>
+  // Sessions that already received a handoff: it is injected at most once.
+  handoffShown: Set<string>
+}
 
 function now() {
   return Date.now()
@@ -96,6 +102,26 @@ async function markSurfaced({ host, config, store: storeIO }: EngineDeps, ids: s
   }
 }
 
+// The <handoff> block, or undefined unless every surfacing condition holds
+// (first request of a session, handoff from another session of this exact
+// project, not dismissed, young enough). Marks the session as served.
+async function handoffBlock(
+  { host, config }: EngineDeps,
+  state: SurfaceState,
+  store: Awaited<ReturnType<EngineDeps["store"]["getStore"]>>,
+  sessionID: string,
+  directory: string,
+  time: number,
+): Promise<string | undefined> {
+  const handoff = surfaceCandidate(store, directory, sessionID, config.handoffMaxAgeHours, time)
+  if (!handoff) return undefined
+  if (!(await isFirstRequest(host, sessionID))) return undefined
+  const currentBranch = handoff.branch ? (await host.vcs?.(directory).catch(() => undefined))?.branch : undefined
+  state.handoffShown.add(sessionID)
+  const maxChars = Math.min(config.handoffMaxChars, Math.floor(config.maxChars / 2))
+  return renderSurfaceHandoff(handoff, { time, currentBranch, maxChars })
+}
+
 async function buildMemoryBlock(
   deps: EngineDeps,
   state: SurfaceState,
@@ -103,11 +129,15 @@ async function buildMemoryBlock(
 ): Promise<string | undefined> {
   const { host, config, store: storeIO } = deps
   const store = await storeIO.getStore()
-  if (store.entries.length === 0 && !(config.summary && store.summary)) return undefined
+  const hasMemory = store.entries.length > 0 || !!(config.summary && store.summary)
+  const mayHandoff = config.handoff && !state.handoffShown.has(sessionID) && store.handoffs.some((handoff) => handoff.sessionID !== sessionID && !handoff.dismissedAt)
+  if (!hasMemory && !mayHandoff) return undefined
   const session = await host.session(sessionID)
   if (!session) return undefined
   const directory = session.directory
   const time = now()
+  const handoffText = mayHandoff ? await handoffBlock(deps, state, store, sessionID, directory, time) : undefined
+  if (!hasMemory) return handoffText ? `<memory>\n${handoffText}\n</memory>` : undefined
   const query = await host.lastUserText(sessionID)
   const ranked = retrieve(store, directory, query, time, {
     excludeSensitivity: new Set(["local-only"]),
@@ -147,6 +177,16 @@ async function buildMemoryBlock(
     }
     lines.push("</facts>")
   }
+  if (handoffText) {
+    // The handoff is capped first (handoffMaxChars, at most half of maxChars);
+    // facts and summary are then trimmed to whatever room remains, so the whole
+    // block still fits in maxChars.
+    const tail = `\n${handoffText}\n</memory>`
+    let head = lines.join("\n")
+    const room = Math.max(0, config.maxChars - tail.length)
+    if (head.length > room) head = `${head.slice(0, Math.max(0, room - 1))}…`
+    return `${head}${tail}`.slice(0, config.maxChars)
+  }
   lines.push("</memory>")
   let block = lines.join("\n")
   if (block.length > config.maxChars) block = `${block.slice(0, config.maxChars - 1)}…`
@@ -154,7 +194,7 @@ async function buildMemoryBlock(
 }
 
 export function createSurface(deps: EngineDeps) {
-  const state: SurfaceState = { lastSurface: new Map(), rerankCache: new Map() }
+  const state: SurfaceState = { lastSurface: new Map(), rerankCache: new Map(), handoffShown: new Set() }
   return {
     // What each session was last shown; read by memory_why and memory_inspect.
     lastSurface: state.lastSurface as ReadonlyMap<string, RankedMemory[]>,

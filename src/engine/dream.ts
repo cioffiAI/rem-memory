@@ -4,6 +4,7 @@
 // journal so an interrupted run is retried by the host's recovery sweep.
 
 import { applyConsolidation, consolidationEntries, extractJson, prune, type Entry } from "../core.ts"
+import { dropTrivialHandoff, parseNarrative, recordHandoff } from "./handoff.ts"
 import type { EngineDeps } from "./host.ts"
 
 function now() {
@@ -80,7 +81,8 @@ TASKS:
 2. update: only entries whose fact genuinely CHANGED in the conversation. Never use update for mere reformulation.
 3. delete: ids of entries that are outdated or contradicted.
 4. conflicts: if the conversation STRONGLY contradicts an entry tagged source=explicit, report it with the entry id and a short evidence quote. Never modify or delete that entry.
-${config.summary ? "5. summary: 2-5 sentence summary of who the user is and how they like to work. NEVER include sensitive data in the summary." : ""}
+${config.summary ? "5. summary: 2-5 sentence summary of who the user is and how they like to work. NEVER include sensitive data in the summary." : ""}${config.handoff ? `
+${config.summary ? 6 : 5}. handoff: a note for the next session in this project, as {"goal":"what the user was trying to achieve","state":"where the work stands now","next":["concrete next steps"],"openQuestions":["unresolved questions"]}, or null if the session was trivial (small talk, a quick question, nothing to resume). Be concise. NEVER include secrets, credentials or sensitive data in the handoff.` : ""}
 
 SOURCE HIERARCHY:
 - Entries tagged source=explicit were stated directly by the user and ALWAYS win over source=dreamed entries.
@@ -100,7 +102,7 @@ RULES:
 - Optionally attach confidence (0-1) to each new fact.
 
 RESPOND WITH STRICT JSON ONLY:
-{"new":[{"text":"...","category":"user|project|workflow|preferences|decisions|status|environment|other","scope":"global|project","confidence":0.9}],"update":[{"id":"...","text":"..."}],"delete":["..."],"conflicts":[{"id":"...","evidence":"..."}]${config.summary ? ',"summary":"..."' : ''}}
+{"new":[{"text":"...","category":"user|project|workflow|preferences|decisions|status|environment|other","scope":"global|project","confidence":0.9}],"update":[{"id":"...","text":"..."}],"delete":["..."],"conflicts":[{"id":"...","evidence":"..."}]${config.summary ? ',"summary":"..."' : ''}${config.handoff ? ',"handoff":{"goal":"...","state":"...","next":["..."],"openQuestions":["..."]}' : ''}}
 
 CURRENT MEMORY ENTRIES:
 ${entriesBlock}
@@ -132,6 +134,15 @@ ${transcript}`
       prune(fresh, now(), config.maxEntries)
       await storeIO.writeStore(fresh)
     })
+    if (config.handoff && parsed.handoff !== undefined) {
+      try {
+        const narrative = parseNarrative(parsed.handoff)
+        if (narrative) await recordHandoff(deps, sessionID, { narrative, messages, directory })
+        else await dropTrivialHandoff(deps, sessionID)
+      } catch (error) {
+        host.log("warn", "handoff enrichment failed", { sessionID, error: String(error) })
+      }
+    }
     state.sessions[sessionID] = lastTs
     completed = true
     host.log("info", "consolidated session", { sessionID, newFacts: parsed.new.length })

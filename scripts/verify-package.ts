@@ -11,7 +11,7 @@
 //   2. pack                     (bun pm pack: the actual tarball)
 //   3. isolated install         (fresh temp dir OUTSIDE the checkout)
 //   4. import by package name   (resolution happens against the install dir)
-//   5. initialize V2            (the adapter registers nine tools and cleans up)
+//   5. initialize V2            (the adapter registers ten tools and cleans up)
 //
 // Run with: bun run verify:package   (also part of prepublishOnly)
 //
@@ -33,6 +33,7 @@ const EXPECTED_TOOLS = [
   "memory_irrelevant",
   "memory_forget",
   "memory_clear",
+  "memory_handoff",
 ]
 
 function run(cmd: string[], cwd: string, env: Record<string, string> = {}): string {

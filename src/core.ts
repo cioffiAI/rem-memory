@@ -62,7 +62,7 @@ export type Handoff = {
   branch?: string
   request?: string
   files: { path: string; status: string }[]
-  narrative?: string
+  narrative?: { goal: string; state: string; next: string[]; openQuestions: string[] }
   level: "mechanical" | "enriched"
   dismissedAt?: number
 }

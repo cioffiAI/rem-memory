@@ -11,6 +11,7 @@ L'utente vuole gestire la propria memoria a lungo termine. Usa gli strumenti ded
 - Svuotamento (`clear`): usa `memory_clear`.
 - Origine di una memoria (`why <id>`): usa `memory_why` e riporta provenance e motivazione del ranking.
 - Ispezione (`stats`, `recent`, `conflicts`, `project`, `surfaced`): usa `memory_inspect` con la view corrispondente; in particolare `conflicts` per le memorie da risolvere e `surfaced` per spiegare perché una memoria è stata iniettata.
+- Ripresa (`resume`): usa `memory_handoff` con `action: "show"` e riassumi dove era arrivata l'ultima sessione di questo progetto (richiesta, file toccati, prossimi passi); `list` per l'elenco, `dismiss` per non riproporla.
 - Feedback su una memoria utilmente surfaceata (utile/irrilevante): usa `memory_useful` / `memory_irrelevant` con l'`id`.
 
 Lingua: rispondi nella stessa lingua dell'utente.
