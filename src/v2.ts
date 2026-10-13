@@ -24,8 +24,8 @@ import {
   type Entry,
   type RankedMemory,
 } from "./core.ts"
-import { resolveConfig, type MemoryConfig } from "./config.ts"
-import { createStore, type StoreIO } from "./store.ts"
+import { isDirExplicit, resolveConfig, type MemoryConfig } from "./config.ts"
+import { createStore, migrateLegacyStore, type StoreIO } from "./store.ts"
 
 type LogLevel = "debug" | "info" | "warn" | "error"
 type SessionInfo = Awaited<ReturnType<Plugin.Context["session"]["get"]>>
@@ -98,16 +98,18 @@ class V2MemoryRuntime {
 
   private readonly config: MemoryConfig
   private readonly store: StoreIO
+  private readonly dirExplicit: boolean
 
   constructor(private readonly ctx: Plugin.Context) {
     this.config = resolveConfig(ctx.options)
+    this.dirExplicit = isDirExplicit(ctx.options)
     this.store = createStore(this.config.dir)
   }
 
   private log(level: LogLevel, message: string, extra?: Record<string, unknown>) {
     if (level === "debug" && !this.config.debug) return
     const details = extra ? ` ${JSON.stringify(extra)}` : ""
-    const line = `[opencode-memory] ${message}${details}`
+    const line = `[rem-memory] ${message}${details}`
     if (level === "error") console.error(line)
     else if (level === "warn") console.warn(line)
     else if (level === "debug") console.debug(line)
@@ -118,6 +120,14 @@ class V2MemoryRuntime {
     if (this.config.off) {
       this.log("info", "memory disabled via configuration")
       return async () => {}
+    }
+
+    if (!this.dirExplicit) {
+      try {
+        if (await migrateLegacyStore(this.config.dir)) this.log("info", "migrated legacy store to rem-memory directory", { dir: this.config.dir })
+      } catch (error) {
+        this.log("warn", "legacy store migration failed", { error: String(error) })
+      }
     }
 
     const loaded = await this.store.getStore()

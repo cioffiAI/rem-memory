@@ -13,7 +13,7 @@ const disposed = []
 const failSetup = process.env.V2_CHECK_FAIL_SETUP === "1"
 const dreamDisabled = process.env.V2_CHECK_DREAM_DISABLED === "1"
 const surfaceDisabled = process.env.V2_CHECK_SURFACE_DISABLED === "1"
-const summaryDisabled = process.env.OPENCODE_MEMORY_SUMMARY === "0"
+const summaryDisabled = process.env.REM_MEMORY_SUMMARY === "0"
 const eventType = process.env.V2_CHECK_EVENT ?? "session.execution.succeeded"
 
 const contextMessages = [
@@ -92,13 +92,13 @@ const ctx = {
   },
 }
 
-if (plugin.id !== "cioffi.opencode-memory" || typeof plugin.setup !== "function" || typeof plugin.server !== "function") {
-  throw new Error("hybrid V1/V2 export is invalid")
+if (plugin.id !== "cioffi.rem-memory" || typeof plugin.setup !== "function") {
+  throw new Error("plugin export is invalid")
 }
 
 if (sweepOnly) {
-  await mkdir(process.env.OPENCODE_MEMORY_DIR, { recursive: true })
-  await writeFile(`${process.env.OPENCODE_MEMORY_DIR}/state.json`, JSON.stringify({
+  await mkdir(process.env.REM_MEMORY_DIR, { recursive: true })
+  await writeFile(`${process.env.REM_MEMORY_DIR}/state.json`, JSON.stringify({
     sessions: {},
     inProgress: {
       [sessionID]: { targetTs: 103, startedAt: 0 },
@@ -122,7 +122,7 @@ const cleanup = await plugin.setup(ctx)
 if (tools.length !== 9) throw new Error(`expected 9 V2 tools, got ${tools.length}`)
 if (surfaceDisabled === Boolean(hooks.context)) throw new Error("SURFACE hook registration does not match configuration")
 
-const storePath = `${process.env.OPENCODE_MEMORY_DIR}/store.json`
+const storePath = `${process.env.REM_MEMORY_DIR}/store.json`
 let store
 if (dreamDisabled) {
   await Bun.sleep(30)

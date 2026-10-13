@@ -1,7 +1,7 @@
 {
-  "name": "@cioffi_ai/opencode-memory",
-  "version": "1.7.2",
-  "description": "Local-first persistent memory for OpenCode using a WRITE → DREAM → SURFACE lifecycle.",
+  "name": "rem-memory",
+  "version": "2.0.0-alpha.0",
+  "description": "Local-first persistent memory for coding agents (OpenCode plugin) using a WRITE → DREAM → SURFACE lifecycle.",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build ./src/index.ts --outfile ./dist/index.js --target node --format esm --external \"@opencode-ai/plugin\" --external \"@opencode/plugin\"",
+    "build": "bun run clean && bun build ./src/index.ts --outfile ./dist/index.js --target node --format esm --external \"@opencode/plugin\"",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "bench": "bun run bench/run.ts",
@@ -39,14 +39,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cioffiAI/opencode-memory.git"
+    "url": "git+https://github.com/cioffiAI/rem-memory.git"
   },
   "bugs": {
-    "url": "https://github.com/cioffiAI/opencode-memory/issues"
+    "url": "https://github.com/cioffiAI/rem-memory/issues"
   },
-  "homepage": "https://github.com/cioffiAI/opencode-memory#readme",
+  "homepage": "https://github.com/cioffiAI/rem-memory#readme",
   "dependencies": {
-    "@opencode-ai/plugin": "^1.18.29",
     "@opencode/plugin": "^2.0.18"
   },
   "devDependencies": {

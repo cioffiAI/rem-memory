@@ -1,5 +1,5 @@
 // Run against a real CLI with an isolated profile and a local mock model.
-// OPENCODE_TEST_BIN=/path/to/opencode OPENCODE_TEST_MAJOR=2 bun run verify:runtime
+// OPENCODE_TEST_BIN=/path/to/opencode bun run verify:runtime  (OpenCode V2 only)
 // OPENCODE_TEST_PACKAGE may point to a clean installed tarball instead of this checkout.
 // OPENCODE_TEST_DISABLE_AUTO=1 also checks that DREAM and SURFACE stay off.
 // OPENCODE_TEST_CONFIG_OPTIONS=1 supplies those switches and dir through
@@ -14,14 +14,11 @@ import { startMockModel } from "../tests/fixtures/mock-model.ts"
 
 const binary = process.env.OPENCODE_TEST_BIN
 if (!binary) throw new Error("Set OPENCODE_TEST_BIN to an existing CLI binary; this script never downloads a CLI")
-const major = process.env.OPENCODE_TEST_MAJOR ?? "2"
-if (!["1", "2"].includes(major)) throw new Error("OPENCODE_TEST_MAJOR must be 1 or 2")
-const v2 = major === "2"
 const configOptions = process.env.OPENCODE_TEST_CONFIG_OPTIONS === "1"
 const disableSummary = process.env.OPENCODE_TEST_DISABLE_SUMMARY === "1"
 const summaryMarker = "STALE_SUMMARY_RUNTIME_MARKER"
 const disableAutomatic = process.env.OPENCODE_TEST_DISABLE_AUTO === "1" || configOptions
-const root = realpathSync(mkdtempSync(join(tmpdir(), `opencode-memory-v${major}-runtime-`)))
+const root = realpathSync(mkdtempSync(join(tmpdir(), "rem-memory-runtime-")))
 const project = join(root, "project")
 const memory = join(root, "memory")
 const configDir = join(root, "config", "opencode")
@@ -41,29 +38,22 @@ const cliEnv = {
   // network requests while booting an otherwise empty CLI profile.
   OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_DISABLE_AUTOUPDATE: "1",
   OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password,
-  OPENCODE_MEMORY_DIR: configOptions ? join(root, "wrong-memory") : memory,
-  OPENCODE_MEMORY_DELAY_MS: "100",
-  OPENCODE_MEMORY_SWEEP_START_MS: "600000", OPENCODE_MEMORY_DEBUG: "1",
-  OPENCODE_MEMORY_SUMMARY: configOptions || !disableSummary ? "1" : "0",
+  REM_MEMORY_DIR: configOptions ? join(root, "wrong-memory") : memory,
+  REM_MEMORY_DELAY_MS: "100",
+  REM_MEMORY_SWEEP_START_MS: "600000", REM_MEMORY_DEBUG: "1",
+  REM_MEMORY_SUMMARY: configOptions || !disableSummary ? "1" : "0",
   ...(configOptions
-    ? { OPENCODE_MEMORY_DREAM: "1", OPENCODE_MEMORY_SURFACE: "1" }
-    : disableAutomatic ? { OPENCODE_MEMORY_DREAM: "0", OPENCODE_MEMORY_SURFACE: "0" } : {}),
+    ? { REM_MEMORY_DREAM: "1", REM_MEMORY_SURFACE: "1" }
+    : disableAutomatic ? { REM_MEMORY_DREAM: "0", REM_MEMORY_SURFACE: "0" } : {}),
 }
 const configuredPackage = configOptions
   ? { dir: memory, dream: false, surface: false, summary: !disableSummary }
   : undefined
-const config = v2 ? {
+const config = {
   plugins: [configuredPackage ? { package: packageDir, options: configuredPackage } : packageDir], model: "memory-test/test",
   providers: { "memory-test": {
     package: "@ai-sdk/openai-compatible", settings: { baseURL: `http://127.0.0.1:${model.server.port}/v1`, apiKey: "test" },
     models: { test: { name: "Compatibility test", limit: { context: 32000, output: 2048 }, capabilities: { tools: true, input: ["text"], output: ["text"] } } },
-  } },
-} : {
-  plugin: [configuredPackage ? [packageDir, configuredPackage] : packageDir], model: "memory-test/test", small_model: "memory-test/test",
-  provider: { "memory-test": {
-    npm: "@ai-sdk/openai-compatible", name: "Compatibility test",
-    options: { baseURL: `http://127.0.0.1:${model.server.port}/v1`, apiKey: "test" },
-    models: { test: { name: "Compatibility test", limit: { context: 32000, output: 2048 } } },
   } },
 }
 writeFileSync(cliEnv.OPENCODE_CONFIG, JSON.stringify(config))
@@ -95,7 +85,7 @@ async function api(path: string, data?: unknown): Promise<any> {
   const text = await response.text()
   if (!response.ok) throw new Error(`${path}: ${response.status} ${text.slice(0,1000)}`)
   const value = JSON.parse(text)
-  return v2 && value && typeof value === "object" && "data" in value ? value.data : value
+  return value && typeof value === "object" && "data" in value ? value.data : value
 }
 async function until(check: () => unknown | Promise<unknown>, label: string, timeout = 30_000) {
   const end = Date.now() + timeout
@@ -110,23 +100,20 @@ async function until(check: () => unknown | Promise<unknown>, label: string, tim
 const store = () => JSON.parse(readFileSync(join(memory, "store.json"), "utf8"))
 try {
   await until(async () => {
-    if (!v2) return (await api("/experimental/tool/ids")).includes("memory_write")
-    return (await api("/api/plugin")).some((plugin: any) => plugin.id === "cioffi.opencode-memory" && plugin.state.status === "active")
+    return (await api("/api/plugin")).some((plugin: any) => plugin.id === "cioffi.rem-memory" && plugin.state.status === "active")
   }, "plugin loaded")
-  const session = await api(v2 ? "/api/session" : "/session", {
+  const session = await api("/api/session", {
     title: "Memory compatibility test",
-    ...(v2 ? { model: { providerID: "memory-test", id: "test" }, permissions: [{ action: "*", resource: "*", effect: "allow" }] } : { permission: [{ permission: "*", pattern: "*", action: "allow" }] }),
+    model: { providerID: "memory-test", id: "test" }, permissions: [{ action: "*", resource: "*", effect: "allow" }],
   })
-  const prefix = `${v2 ? "/api" : ""}/session/${session.id}`
+  const prefix = `/api/session/${session.id}`
   async function sendAndCheck(text: string, expected: string) {
     const before = model.requests.length
     const prompt = text === "WRITE_TEST" ? `${text}: I prefer teal terminal themes.` : text
-    await api(`${prefix}/${v2 ? "prompt" : "message"}`, v2 ? { text: prompt } : {
-      parts: [{ type: "text", text: prompt }], model: { providerID: "memory-test", modelID: "test" },
-    })
+    await api(`${prefix}/prompt`, { text: prompt })
     await until(() => model.requests.slice(before).some((request) => request.messages?.some((message: any) =>
       message.role === "tool" && JSON.stringify(message).includes(expected))), `${text} tool result`)
-    if (v2) await until(async () => (await api(`${prefix}/context`)).at(-1)?.type === "idle", "session idle")
+    await until(async () => (await api(`${prefix}/context`)).at(-1)?.type === "idle", "session idle")
   }
   await sendAndCheck("WRITE_TEST", "Remembered")
   await sendAndCheck("READ_TEST", "coffee in the morning")
@@ -167,10 +154,10 @@ try {
   if (JSON.stringify(store().entries.map((entry: any) => entry.id).sort()) !== JSON.stringify(saved.entries.map((entry: any) => entry.id).sort())) {
     throw new Error("summary-only clear lost facts")
   }
-  console.log(`OK V${major}: parallel writes${v2 ? " through Code Mode Promise.all" : " through concurrent tool calls"}, summary-only clear${disableSummary ? ", summary hidden and DREAM summary disabled" : ""}`)
+  console.log(`OK: parallel writes through Code Mode Promise.all, summary-only clear${disableSummary ? ", summary hidden and DREAM summary disabled" : ""}`)
   console.log(disableAutomatic
-    ? `OK V${major}: real CLI load, nine tools, write/read, DREAM and SURFACE disabled${configOptions ? " through opencode.jsonc" : ""}, migration, local-only privacy`
-    : `OK V${major}: real CLI load, nine tools, write/read, context, DREAM, migration, local-only privacy, tool-free internal calls`)
+    ? `OK: real CLI load, nine tools, write/read, DREAM and SURFACE disabled${configOptions ? " through opencode.jsonc" : ""}, migration, local-only privacy`
+    : `OK: real CLI load, nine tools, write/read, context, DREAM, migration, local-only privacy, tool-free internal calls`)
   writeFileSync(join(root, "result.json"), JSON.stringify({ version: version.stdout.toString().trim(), packageDir, checks: "passed", requests: model.requests.length, internalCalls: internal.length }, null, 2))
 } finally {
   child.kill("SIGTERM")

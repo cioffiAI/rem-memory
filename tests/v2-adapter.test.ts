@@ -4,20 +4,20 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 function runV2Check(extraEnv: Record<string, string> = {}) {
-  const memoryDir = mkdtempSync(join(tmpdir(), "opencode-memory-v2-test-"))
+  const memoryDir = mkdtempSync(join(tmpdir(), "rem-memory-v2-test-"))
   try {
     const result = Bun.spawnSync({
       cmd: ["bun", join(import.meta.dir, "fixtures", "v2-check.ts")],
       cwd: join(import.meta.dir, ".."),
       env: {
         ...process.env,
-        OPENCODE_MEMORY_DIR: memoryDir,
-        OPENCODE_MEMORY_DREAM: "1",
-        OPENCODE_MEMORY_SURFACE: "1",
-        OPENCODE_MEMORY_SUMMARY: "1",
-        OPENCODE_MEMORY_DELAY_MS: "0",
-        OPENCODE_MEMORY_SWEEP_START_MS: "600000",
-        OPENCODE_MEMORY_SWEEP_MS: "600000",
+        REM_MEMORY_DIR: memoryDir,
+        REM_MEMORY_DREAM: "1",
+        REM_MEMORY_SURFACE: "1",
+        REM_MEMORY_SUMMARY: "1",
+        REM_MEMORY_DELAY_MS: "0",
+        REM_MEMORY_SWEEP_START_MS: "600000",
+        REM_MEMORY_SWEEP_MS: "600000",
         ...extraEnv,
       },
       stdout: "pipe",
@@ -37,7 +37,7 @@ for (const event of ["session.execution.succeeded", "session.execution.failed", 
 }
 
 test("V2 recovery pass retries a stale interrupted DREAM", () => {
-  runV2Check({ V2_CHECK_SWEEP_ONLY: "1", OPENCODE_MEMORY_SWEEP_START_MS: "0" })
+  runV2Check({ V2_CHECK_SWEEP_ONLY: "1", REM_MEMORY_SWEEP_START_MS: "0" })
 })
 
 test("V2 setup rolls back tool registration if context hook registration fails", () => {
@@ -45,20 +45,20 @@ test("V2 setup rolls back tool registration if context hook registration fails",
 })
 
 test("V2 can disable DREAM while keeping explicit tools and SURFACE", () => {
-  runV2Check({ OPENCODE_MEMORY_DREAM: "0", V2_CHECK_DREAM_DISABLED: "1" })
+  runV2Check({ REM_MEMORY_DREAM: "0", V2_CHECK_DREAM_DISABLED: "1" })
 })
 
 test("V2 DREAM omits a disabled summary and ignores an unsolicited model summary", () => {
-  runV2Check({ OPENCODE_MEMORY_SUMMARY: "0" })
+  runV2Check({ REM_MEMORY_SUMMARY: "0" })
 })
 
 test("V2 can disable SURFACE while keeping DREAM and explicit tools", () => {
-  runV2Check({ OPENCODE_MEMORY_SURFACE: "0", V2_CHECK_SURFACE_DISABLED: "1" })
+  runV2Check({ REM_MEMORY_SURFACE: "0", V2_CHECK_SURFACE_DISABLED: "1" })
 })
 
 test("V2 can disable both automatic processes", () => {
   runV2Check({
-    OPENCODE_MEMORY_DREAM: "0", OPENCODE_MEMORY_SURFACE: "0",
+    REM_MEMORY_DREAM: "0", REM_MEMORY_SURFACE: "0",
     V2_CHECK_DREAM_DISABLED: "1", V2_CHECK_SURFACE_DISABLED: "1",
   })
 })

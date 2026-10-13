@@ -5,6 +5,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0-alpha.0] — unreleased
+
+### Removed
+
+- OpenCode V1 adapter (`server()` export, `src/v1.ts`, headless child sessions,
+  orphan GC), the V1-only `src/rerank.ts`, and the `@opencode-ai/plugin`
+  dependency. V1 users should stay on `@cioffi_ai/opencode-memory` 1.x.
+- `gcChildAgeMs` no longer has any effect (see Changed).
+
+### Changed
+
+- Package renamed to `rem-memory` (plugin id `cioffi.rem-memory`, log prefix
+  `[rem-memory]`, `SUMMARY.md` heading `# rem-memory summary`). Tool names
+  `memory_*` are unchanged.
+- Environment variables are now `REM_MEMORY_*`. The old `OPENCODE_MEMORY_*`
+  names are read as a fallback with one deprecation warning per process;
+  `REM_MEMORY_*` wins when both are set.
+- Default data directory is `~/.local/share/rem-memory`.
+- `gcChildAgeMs` is still accepted and validated but ignored; setting it logs
+  a deprecation warning.
+
+### Added
+
+- One-time migration of `store.json`, `state.json` and `SUMMARY.md` from
+  `~/.local/share/opencode/memory` when `dir` is not set explicitly and the new
+  directory has no store. A `MIGRATED_TO_REM_MEMORY` marker is written in the
+  old directory; old files are never deleted.
+
 ## [1.7.2] — 2026-09-30
 
 ### Added

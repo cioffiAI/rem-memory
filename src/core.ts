@@ -1,4 +1,4 @@
-// Pure logic of opencode-memory, kept free of opencode runtime dependencies so
+// Pure logic of rem-memory, kept free of opencode runtime dependencies so
 // it can be unit-tested directly. The plugin entrypoint (index.ts) imports
 // from here; nothing of this module is re-exported from the entrypoint.
 
@@ -192,7 +192,7 @@ export function topicClash(a: string, b: string): boolean {
 //     prompts (entries list AND dedup prompt), semantic rerank candidates,
 //     summaries-by-construction, tool responses (memory_read/why/inspect),
 //     and every mutating tool (update/forget/feedback). The only supported
-//     access path is direct file inspection of OPENCODE_MEMORY_DIR by the
+//     access path is direct file inspection of REM_MEMORY_DIR by the
 //     human user.
 // ---------------------------------------------------------------------------
 

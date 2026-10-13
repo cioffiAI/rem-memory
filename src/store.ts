@@ -2,9 +2,9 @@
 // Split out of index.ts so persistence concerns have a single boundary; the
 // consolidation and tool paths all go through these helpers.
 
-import { mkdir, open, readFile, rename, unlink, writeFile } from "fs/promises"
+import { copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from "fs/promises"
 import path from "path"
-import { resolveConfig } from "./config.ts"
+import { legacyDir, resolveConfig } from "./config.ts"
 import { emptyStore, normalizeStore, type Store } from "./core.ts"
 
 function now() {
@@ -97,7 +97,7 @@ export function createStore(dataDir: string) {
     await writeJson(storeFile, store)
     await writeFile(
       summaryFile,
-      `# opencode memory summary\n\nUpdated: ${new Date(store.updatedAt).toISOString()}\n\n${store.summary || "_No summary yet — it is generated after the first consolidation._"}\n`,
+      `# rem-memory summary\n\nUpdated: ${new Date(store.updatedAt).toISOString()}\n\n${store.summary || "_No summary yet — it is generated after the first consolidation._"}\n`,
       "utf8",
     )
   }
@@ -117,6 +117,36 @@ export function createStore(dataDir: string) {
 }
 
 export type StoreIO = ReturnType<typeof createStore>
+
+export const MIGRATION_MARKER = "MIGRATED_TO_REM_MEMORY"
+const MIGRATED_FILES = ["store.json", "state.json", "SUMMARY.md"]
+
+async function exists(file: string) {
+  return stat(file).then(() => true, () => false)
+}
+
+// One-time copy of the pre-rename store (~/.local/share/opencode/memory) into
+// the new default directory. Never called for an explicitly chosen `dir`.
+// The old directory is only ever read, plus a marker file written into it.
+export async function migrateLegacyStore(dir: string, home?: string): Promise<boolean> {
+  const oldDir = legacyDir(home)
+  const newDir = path.resolve(dir)
+  if (oldDir === newDir) return false
+  if (await exists(path.join(newDir, "store.json"))) return false
+  if (!(await exists(path.join(oldDir, "store.json")))) return false
+  return createStore(newDir).withLock(async () => {
+    // Re-check under the lock: another instance may have migrated meanwhile.
+    if (await exists(path.join(newDir, "store.json"))) return false
+    // store.json last, so a partial copy is retried on the next start.
+    for (const name of [...MIGRATED_FILES].reverse()) {
+      if (await exists(path.join(oldDir, name))) {
+        await copyFile(path.join(oldDir, name), path.join(newDir, name))
+      }
+    }
+    await writeFile(path.join(oldDir, MIGRATION_MARKER), `${newDir}\n${new Date().toISOString()}\n`, "utf8")
+    return true
+  })
+}
 // Direct callers retain the default helpers. Resolve their environment only
 // when first used, so plugin options can override it during adapter setup.
 let defaultStore: StoreIO | undefined
