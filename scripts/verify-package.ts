@@ -55,7 +55,6 @@ function step(message: string) {
 const CHECK_SCRIPT = `
  import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
  import plugin from "${PKG_NAME}"
- import serverPlugin from "${PKG_NAME}/server"
 
 const EXPECTED = ${JSON.stringify(EXPECTED_TOOLS)}
 const manifest = JSON.parse(readFileSync("node_modules/${PKG_NAME}/package.json", "utf8"))
@@ -65,10 +64,6 @@ if (!manifest.dependencies?.["@opencode/plugin"]) {
 }
 if (plugin.id !== "cioffi.rem-memory" || typeof plugin.setup !== "function" || "server" in plugin) {
   console.error("FAIL: package does not expose the V2-only id/setup contract")
-  process.exit(1)
-}
-if (serverPlugin.id !== plugin.id || typeof serverPlugin.setup !== "function") {
-  console.error("FAIL: conventional V2 ./server export is unavailable")
   process.exit(1)
 }
 

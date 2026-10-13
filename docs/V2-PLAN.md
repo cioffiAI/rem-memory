@@ -28,7 +28,7 @@ grafo di entità, sync. Lo store resta JSON (versione 3, migrazione additiva).
 
 | PR | Titolo | Dim. | Dipende da | Versione |
 |----|--------|------|-----------|----------|
-| 0 | Spike API OpenCode V2 (non si mergia) | S | — | — |
+| 0 | Spike API OpenCode V2 — ✅ fatto, vedi `docs/spike-v2.md` | S | — | — |
 | 1 | Rimozione V1 + rename `rem-memory` | M | — | 2.0.0-alpha.0 |
 | 2 | Estrazione engine + schema store v3 | M | 1 | 2.0.0-alpha.1 |
 | 3 | ① Ancore al codice e staleness | L | 0, 2 | 2.0.0-alpha.2 |
@@ -41,7 +41,30 @@ fissato nella PR 2.
 
 ---
 
-## PR 0 — Spike sulle API di OpenCode V2
+## PR 0 — Spike sulle API di OpenCode V2 ✅
+
+Eseguito il 2026-10-13 su OpenCode 2.0.18 reale (profilo isolato, modello mock).
+Risultati completi in `docs/spike-v2.md`. Conseguenze sul piano:
+
+- **File toccati**: fonte primaria `snapshot.files` dei messaggi `assistant`
+  (path relativi al worktree; copre edit/write/patch e shell). Fuori da git
+  `snapshot` è assente → fallback sulle tool part: `edit`/`write` →
+  `state.input.path` (può essere relativo), `patch` → path estratti da
+  `patchText`. Code Mode `execute` non contiene tool di file.
+- **`ctx.vcs`**: `get()` ~0,3 ms (`branch.current`), `status()` 15–48 ms; fuori
+  da git restituisce valori vuoti senza errori. È legato alla directory del
+  plugin (`input.location` ignorato).
+- **Todo**: non esiste alcun tool todo in V2 → rimossi i `todos` dall'handoff.
+- **Prima richiesta**: contare i messaggi `user` di `session.context()` (=1) più
+  un flag per sessione nel runtime (la compaction altera `event.messages`).
+- **`command.transform`**: funziona; `execute` riceve `{sessionID, prompt:{text}}`
+  e non interroga il modello da solo → il `/memory` nativo deve chiamare
+  `ctx.session.prompt` (non ancora verificato).
+- **`server.js` / `./server`**: non servono → rimossi nella PR 1.
+- **Limite noto**: il plugin è inizializzato per la directory di avvio del
+  server; sessioni in altre directory non sono state verificate.
+
+Domande originali dello spike:
 
 Script usa-e-getta contro un binario OpenCode ≥ 2.0.18 reale (riusa il
 modello deterministico di `scripts/verify-runtime.ts`). Risposte da scrivere in
@@ -135,15 +158,19 @@ export interface Host {
   readonly name: "opencode"            // "claude-code" | "mcp" in futuro
   directoryFor(sessionID: string): Promise<string | undefined>
   generate(prompt: string, opts: { sessionID?: string; timeoutMs: number }): Promise<string>
-  transcript(sessionID: string): Promise<TranscriptMessage[]>   // testo + tool part normalizzate
+  transcript(sessionID: string): Promise<TranscriptMessage[]>   // testo + tool part + snapshot.files normalizzati
   lastUserText(sessionID: string): Promise<string>
   vcs?(directory: string): Promise<{ branch?: string; changed: ChangedFile[] } | undefined>
   log(level: LogLevel, message: string, extra?: Record<string, unknown>): void
 }
 ```
 
-`TranscriptMessage` normalizza le part `tool` (`{ tool, input }`), oggi perse in
-`messageText()` come `[tool]`: servono a PR 3 e PR 4.
+`TranscriptMessage` normalizza le part `tool` (`{ tool, input }`, oggi perse in
+`messageText()` come `[tool]`) e `snapshot.files` dei messaggi assistant. Una
+funzione pura `touchedFiles(messages)` unisce `snapshot.files` con il fallback
+sulle tool part (`edit`/`write` → `input.path`, `patch` → path da `patchText`),
+normalizza in path relativi al progetto e scarta quelli fuori dal progetto.
+Serve a PR 3 e PR 4.
 
 **Schema store v3** (solo tipi + migrazione, nessun uso ancora):
 
@@ -216,8 +243,8 @@ Le ancore si controllano solo sui candidati già usciti da `retrieve()`
   Ancore non valide → errore leggibile, il fatto non viene salvato
   (l'utente l'ha chiesto esplicitamente).
 - **DREAM**: i fatti `new` possono avere `"anchors": ["path#symbol"]`. Il prompt
-  elenca i file toccati nella sessione (dalle tool part normalizzate / vcs,
-  secondo lo spike) come unici candidati ammessi. Ancore non valide → scartate,
+  elenca i file toccati nella sessione (`touchedFiles`, vedi PR 2) come unici
+  candidati ammessi. Ancore non valide → scartate,
   il fatto resta senza ancore.
 - **Riconferma**: `memory_write` sullo stesso testo, `memory_update` e
   `memory_useful` ricalcolano gli hash → l'entry torna `fresh`.
@@ -260,7 +287,6 @@ type Handoff = {
   branch?: string
   request?: string                  // ultima richiesta utente, max 300 char
   files: { path: string; status: "added" | "modified" | "deleted" }[]  // max 20
-  todos?: { text: string; done: boolean }[]                             // se lo spike lo conferma
   narrative?: { goal: string; state: string; next: string[]; openQuestions: string[] }
   level: "mechanical" | "enriched"
   dismissedAt?: number
@@ -272,18 +298,19 @@ type Handoff = {
 
 1. **Meccanico, senza LLM, immediato**: all'evento di completamento della
    sessione (già intercettato per DREAM) si scrive o aggiorna l'handoff con
-   branch, file toccati, ultima richiesta e todo. Non dipende dal debounce di
-   90 s.
+   branch (`vcs.get`), file toccati (`touchedFiles`) e ultima richiesta. Non
+   dipende dal debounce di 90 s. (V2 non ha un tool todo: niente todo.)
 2. **Arricchito in DREAM, senza costo extra**: la stessa chiamata di
    consolidazione restituisce anche
    `"handoff": {"goal","state","next":[],"openQuestions":[]}` (oppure `null`
-   per sessioni banali). Se `null` e non ci sono né file né todo, l'handoff
+   per sessioni banali). Se `null` e non ci sono file toccati, l'handoff
    meccanico viene rimosso (niente rumore per le sessioni di sole domande).
 
 ### SURFACE
 
 Blocco `<handoff>` iniettato **solo** quando tutte queste condizioni valgono:
-- è la prima richiesta di una sessione nuova nello stesso progetto;
+- è la prima richiesta di una sessione nuova nello stesso progetto (un solo
+  messaggio `user` in `session.context()` e flag per sessione nel runtime);
 - l'handoff viene da un'altra sessione, non è stato scartato, ha meno di
   `handoffMaxAgeHours` (default 72);
 - `handoff` non è disattivato in config.
@@ -316,14 +343,17 @@ nel budget `maxChars`.
 
 Scrittura meccanica senza DREAM; arricchimento e merge; iniezione solo alla
 prima richiesta; scadenza per età; dismiss; isolamento fra progetti;
-`memory_clear`; sessione banale → nessun handoff.
+`memory_clear`; sessione banale → nessun handoff; progetto non git (niente
+branch, file dalle tool part).
 
 ---
 
 ## PR 5 — Comando nativo, documentazione, release
 
-- Registrare `/memory` via `command.transform` (se lo spike lo conferma), così
-  sparisce il passaggio manuale `curl … commands/memory.md`.
+- Registrare `/memory` via `command.transform` (confermato dallo spike);
+  `execute` inoltra le istruzioni di `commands/memory.md` con
+  `ctx.session.prompt` (da verificare con la CLI reale). Così sparisce il
+  passaggio manuale `curl … commands/memory.md`.
 - README riscritto: posizionamento (memoria verificabile e pensata per il
   coding), ancore, handoff, **guida di migrazione 1.x → 2.0** (nome pacchetto,
   `plugins`, env, directory).
@@ -336,7 +366,8 @@ prima richiesta; scadenza per età; dismiss; isolamento fra progetti;
 
 | Rischio | Mitigazione |
 |---------|-------------|
-| In Code Mode le modifiche ai file non sono visibili come tool part | Lo spike lo verifica; fallback `vcs.status` (delta fra inizio e fine sessione) |
+| `snapshot` assente fuori da git | Fallback sulle tool part `edit`/`write`/`patch` (verificato nello spike) |
+| Sessioni in directory diverse da quella di avvio | Non verificato nello spike: test dedicato nella PR 4 prima di contare sul comportamento |
 | Progetto non git | Ancore funzionanti (basate su hash); handoff senza branch/file da vcs |
 | Ogni modifica rende `drifted` | `drifted` produce solo una nota, nessuna penalità; l'esclusione avviene solo con `broken` |
 | Cambio branch | Stato derivato, mai distruttivo; si ricalcola |

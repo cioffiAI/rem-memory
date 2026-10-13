@@ -13,6 +13,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   orphan GC), the V1-only `src/rerank.ts`, and the `@opencode-ai/plugin`
   dependency. V1 users should stay on `@cioffi_ai/opencode-memory` 1.x.
 - `gcChildAgeMs` no longer has any effect (see Changed).
+- The `./server` export and `server.js`: OpenCode V2 loads the package through
+  its main `"."` export.
 
 ### Changed
 
