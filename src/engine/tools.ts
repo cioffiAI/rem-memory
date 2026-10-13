@@ -26,6 +26,7 @@ import {
   entryAnchorState,
   refreshAnchors,
 } from "./anchors.ts"
+import { clearProjectHandoffs, listLine, projectHandoffs, renderToolHandoff } from "./handoff.ts"
 import type { EngineDeps } from "./host.ts"
 import type { Surface } from "./surface.ts"
 
@@ -49,6 +50,7 @@ export const MEMORY_TOOL_NAMES = [
   "memory_irrelevant",
   "memory_forget",
   "memory_clear",
+  "memory_handoff",
 ] as const
 
 function now() {
@@ -469,6 +471,7 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
         if (args.summaryOnly && args.scope) return "The summary is shared; omit scope when using summaryOnly."
         const directory = await host.directoryFor(context.sessionID)
         let removed = 0
+        let removedHandoffs = 0
         await storeIO.withLock(async () => {
           const fresh = await storeIO.getStore()
           const before = fresh.entries.length
@@ -476,19 +479,61 @@ export function createTools({ host, config, store: storeIO }: EngineDeps, surfac
             fresh.summary = ""
           } else if (args.scope === "project") {
             removed = clearProjectEntries(fresh, directory)
+            removedHandoffs = clearProjectHandoffs(fresh, directory)
           } else if (args.scope === "global") {
             fresh.entries = fresh.entries.filter((entry) => entry.scope !== "global")
             removed = before - fresh.entries.length
           } else {
             fresh.entries = []
             removed = before
+            removedHandoffs = fresh.handoffs.length
+            fresh.handoffs = []
           }
           if (removed || (!args.scope && !args.summaryOnly)) fresh.summary = ""
           fresh.updatedAt = now()
           await storeIO.writeStore(fresh)
         })
         if (args.summaryOnly) return "Cleared memory summary; retained all facts."
-        return removed ? `Cleared ${removed} memory entr${removed === 1 ? "y" : "ies"}.` : "Memory already empty."
+        const cleared = [
+          removed ? `${removed} memory entr${removed === 1 ? "y" : "ies"}` : "",
+          removedHandoffs ? `${removedHandoffs} handoff${removedHandoffs === 1 ? "" : "s"}` : "",
+        ].filter(Boolean)
+        return cleared.length > 0 ? `Cleared ${cleared.join(" and ")}.` : "Memory already empty."
+      },
+    },
+    {
+      name: "memory_handoff",
+      description: "Session handoff: the note left by the latest sessions of this project (request, files touched, next steps). show = latest, list = all for this project, dismiss = stop offering one (id, default latest). Other projects' handoffs are never visible.",
+      input: objectSchema({
+        action: { type: "string", enum: ["show", "list", "dismiss"], description: "Default show" },
+        id: { type: "string", description: "Handoff id from list (dismiss only; default latest)" },
+      }),
+      execute: async (args, context) => {
+        const action = args.action ?? "show"
+        const directory = await host.directoryFor(context.sessionID)
+        if (action === "show") {
+          const latest = projectHandoffs(await storeIO.getStore(), directory)[0]
+          return latest ? renderToolHandoff(latest) : "No handoff for this project."
+        }
+        if (action === "list") {
+          const all = projectHandoffs(await storeIO.getStore(), directory)
+          return all.length > 0 ? [`${all.length} handoff${all.length === 1 ? "" : "s"} for this project:`, ...all.map((handoff) => listLine(handoff))].join("\n") : "No handoff for this project."
+        }
+        if (action === "dismiss") {
+          let dismissed: string | undefined
+          await storeIO.withLock(async () => {
+            const fresh = await storeIO.getStore()
+            const visible = projectHandoffs(fresh, directory)
+            const target = args.id ? visible.find((handoff) => handoff.id === args.id) : visible.find((handoff) => !handoff.dismissedAt)
+            if (!target) return
+            target.dismissedAt = now()
+            fresh.updatedAt = now()
+            await storeIO.writeStore(fresh)
+            dismissed = target.id
+          })
+          return dismissed ? `Dismissed handoff ${dismissed}.` : "No matching handoff found."
+        }
+        return "Unknown action; use show, list or dismiss."
       },
     },
   ]

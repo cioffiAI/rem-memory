@@ -32,6 +32,8 @@ WRITE → DREAM → SURFACE lifecycle:
   model-visible path (see [Privacy](#privacy) for the exact threat model)
 - Global and project-scoped memories with enforced per-directory isolation,
   cross-language semantic deduplication
+- **Session handoff**: a "where we left off" note that the next session of
+  the same project receives once (see [Session handoff](#session-handoff))
 - Tool-free internal generation for DREAM, dedup and reranking
 
 ## Project scope semantics
@@ -74,8 +76,8 @@ rem-memory targets OpenCode 2.0.18+ (V2). The OpenCode V1 adapter was removed
 in 2.0; V1 users should stay on `@cioffi_ai/opencode-memory` 1.x.
 
 OpenCode V2 exposes plugin tools through its Code Mode catalog by default (for example,
-`tools.memory_read(...)` inside `execute`). This is normal: the nine memory
-tools need not appear as nine standalone model tool definitions.
+`tools.memory_read(...)` inside `execute`). This is normal: the ten memory
+tools need not appear as ten standalone model tool definitions.
 
 OpenCode installs npm plugins automatically via Bun on startup and caches them
 in `~/.cache/opencode/node_modules/`. Restart OpenCode after adding the entry.
@@ -107,6 +109,7 @@ plugin, and the automatic DREAM cycle runs regardless.
 | `memory_why` | Audit a memory: provenance, lifecycle, score breakdown, code anchors |
 | `memory_inspect` | `stats` \| `recent` \| `conflicts` \| `project` \| `surfaced` \| `stale` (code-anchored memories that drifted or broke) |
 | `memory_useful` / `memory_irrelevant` | Feedback on retrieval quality |
+| `memory_handoff` | `show` \| `list` \| `dismiss` (`id`): session handoffs of the current project only |
 
 `memory_write` retains distinct facts even when they share similar wording or
 are submitted together with `Promise.all`. Repeating the same text (ignoring
@@ -178,6 +181,36 @@ same `memory_write`: the hashes are recomputed and the entry is fresh again
 - Anchors are checked only for the few candidates about to be shown, so the
   per-request cost stays small. Entries without anchors behave exactly as before.
 
+## Session handoff
+
+When a session completes, rem-memory immediately writes a **mechanical**
+handoff (no model call): the files the session touched (from OpenCode's
+snapshot, falling back to edit/write/patch tool inputs outside git), their
+status from `vcs`, the current branch and the last user request. Sessions that
+touched no files leave nothing behind. The next DREAM pass **enriches** it for
+free, in the same call, with a short narrative (`goal`, `state`, `next`,
+`openQuestions`) or removes it when the session was trivial and touched no
+files. There is one handoff per session; the newest `handoffKeep` per project
+are retained.
+
+The next session in the **same project directory** receives a `<handoff>`
+block, inside the `<memory>` block, only on its first request, only once, only
+if the handoff comes from another session, is not dismissed and is younger than
+`handoffMaxAgeHours`. The text is deliberately soft ("mention it only if the
+user's request relates to it") and notes the original branch when it differs
+from the current one. The handoff gets at most `handoffMaxChars` (and never
+more than half of `maxChars`); the summary and facts are trimmed to the
+remaining room so the whole block still fits in `maxChars`. Use
+`memory_handoff` to `show` the latest, `list` all, or `dismiss` one, and
+`/memory resume` to pick up where you left off.
+
+Privacy: handoffs are derived from the transcript like the summary, the DREAM
+prompt forbids secrets in them, and `local-only` entries never enter one.
+A project's handoffs are never visible from another project.
+`memory_clear({ scope: "project" })` removes the project's handoffs and
+`memory_clear()` removes all of them; `scope: "global"` and `summaryOnly` leave
+them untouched.
+
 ## Recency, exposure and feedback
 
 Time-based decay is computed from `lastSeen` — the last time a fact was
@@ -235,6 +268,10 @@ with the offending name instead of silently falling back.
 | `rerankCacheMs` | `REM_MEMORY_RERANK_CACHE_MS` | 60000 | Rerank cache lifetime. |
 | `coreSlot` | `REM_MEMORY_CORE_SLOT` | 3 | Core-tier entries injected beyond relevance matches. |
 | `surfaceRefreshMs` | `REM_MEMORY_SURFACE_REFRESH_MS` | 900000 | Minimum interval between persisted exposure updates. |
+| `handoff` | `REM_MEMORY_HANDOFF` | true | Session handoff: mechanical write, DREAM enrichment and first-request injection. `false` disables all three; `memory_handoff` still reads existing data. |
+| `handoffMaxAgeHours` | `REM_MEMORY_HANDOFF_MAX_AGE_HOURS` | 72 | Older handoffs are no longer injected (still listed by `memory_handoff`). |
+| `handoffKeep` | `REM_MEMORY_HANDOFF_KEEP` | 3 | Handoffs kept per project (newest first); 50 overall. |
+| `handoffMaxChars` | `REM_MEMORY_HANDOFF_MAX_CHARS` | 800 | Maximum characters of the injected `<handoff>` block (at most half of `maxChars`). |
 
 **Legacy environment variables.** The pre-2.0 `OPENCODE_MEMORY_*` names (same
 suffixes, for example `OPENCODE_MEMORY_DREAM`) are still read as a fallback,
@@ -432,7 +469,7 @@ OPENCODE_TEST_BIN_V2=/path/to/opencode-v2 bun run verify:package
 
 The runtime check uses a temporary profile and a deterministic model served on
 localhost; no AI credentials or paid model calls are needed. It checks
-loading, all nine tool registrations, write/read, context injection, automatic
+loading, all ten tool registrations, write/read, context injection, automatic
 DREAM, store migration and local-only privacy. Logs and request evidence stay in
 the printed temporary directory. The default unit test suite does not replace
 this opt-in runtime check.

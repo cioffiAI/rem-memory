@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { isDirExplicit, resolveConfig, type MemoryConfig } from "../config.ts"
 import { consolidate } from "../engine/dream.ts"
+import { writeMechanicalHandoff } from "../engine/handoff.ts"
 import type { ChangedFile, Host, LogLevel, SessionRef, TranscriptMessage } from "../engine/host.ts"
 import { createSurface } from "../engine/surface.ts"
 import { createTools, MEMORY_TOOL_NAMES } from "../engine/tools.ts"
@@ -157,8 +158,8 @@ class V2MemoryRuntime {
         }))
       }
 
+      if (this.config.dream || this.config.handoff) this.eventTask = this.consumeEvents()
       if (this.config.dream) {
-        this.eventTask = this.consumeEvents()
         this.sweepStartTimer = setTimeout(() => void this.sweep(), this.config.sweepStartMs)
         this.sweepRepeatTimer = setInterval(() => void this.sweep(), this.config.sweepIntervalMs)
       }
@@ -198,8 +199,15 @@ class V2MemoryRuntime {
         const sessionID = String(event.data.sessionID)
         const directory = event.location?.directory ?? (await this.sessionInfo(sessionID))?.location.directory
         if (directory !== this.ctx.location.directory || this.controller.signal.aborted) continue
-        this.log("debug", "session completed -> schedule", { sessionID, event: event.type })
-        this.scheduleConsolidation(sessionID)
+        this.log("debug", "session completed", { sessionID, event: event.type })
+        // The mechanical handoff is written right away: it must not wait for
+        // the DREAM debounce, nor depend on DREAM being enabled.
+        if (this.config.handoff) {
+          await writeMechanicalHandoff(this.deps, sessionID).catch((error) => {
+            this.log("warn", "handoff write failed", { sessionID, error: String(error) })
+          })
+        }
+        if (this.config.dream) this.scheduleConsolidation(sessionID)
       }
     } catch (error) {
       if (!this.controller.signal.aborted) this.log("warn", "event subscription failed", { error: String(error) })

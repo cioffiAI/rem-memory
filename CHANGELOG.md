@@ -5,6 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0-beta.0] — unreleased
+
+### Added
+
+- Session handoff: a mechanical "where we left off" note (touched files, branch,
+  last request) written as soon as a session completes, optionally enriched by
+  DREAM with a goal/state/next/open-questions narrative, and injected once into
+  the first request of the next session of the same project.
+- `memory_handoff` tool (`show`, `list`, `dismiss`); 10 tools in total.
+- Options `handoff`, `handoffMaxAgeHours`, `handoffKeep`, `handoffMaxChars`
+  (`REM_MEMORY_HANDOFF*`).
+- `/memory resume` in `commands/memory.md`.
+
+### Changed
+
+- `memory_clear({ scope: "project" })` also removes the project's handoffs and
+  `memory_clear()` removes all of them.
+- The DREAM prompt gains a handoff task only while `handoff` is enabled; with
+  `handoff: false` it is unchanged.
+
 ## [2.0.0-alpha.2] — unreleased
 
 ### Added

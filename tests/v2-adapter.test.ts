@@ -62,3 +62,15 @@ test("V2 can disable both automatic processes", () => {
     V2_CHECK_DREAM_DISABLED: "1", V2_CHECK_SURFACE_DISABLED: "1",
   })
 })
+
+test("V2 completion event writes the mechanical handoff immediately", () => {
+  runV2Check({ V2_CHECK_HANDOFF: "1" })
+})
+
+test("V2 writes the handoff even with DREAM disabled", () => {
+  runV2Check({ V2_CHECK_HANDOFF: "1", REM_MEMORY_DREAM: "0", V2_CHECK_DREAM_DISABLED: "1" })
+})
+
+test("V2 writes no handoff when handoff is disabled", () => {
+  runV2Check({ V2_CHECK_SNAPSHOT: "1", REM_MEMORY_HANDOFF: "0" })
+})

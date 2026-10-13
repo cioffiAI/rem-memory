@@ -145,8 +145,8 @@ try {
   const internal = model.requests.filter((request) => /You are (the memory consolidation module|a deduplication checker)/.test(JSON.stringify(request.messages)))
   if (disableAutomatic && internal.length) throw new Error("DREAM called the model while disabled")
   if (!disableAutomatic && (!internal.length || internal.some((request) => request.tools?.length))) throw new Error("DREAM/dedup exposed tools")
-  const names = ["read", "write", "update", "why", "inspect", "useful", "irrelevant", "forget", "clear"].map((name) => `memory_${name}`)
-  if (names.some((name) => !allRequests.includes(name))) throw new Error("not all nine memory tools reached the model")
+  const names = ["read", "write", "update", "why", "inspect", "useful", "irrelevant", "forget", "clear", "handoff"].map((name) => `memory_${name}`)
+  if (names.some((name) => !allRequests.includes(name))) throw new Error("not all ten memory tools reached the model")
   await sendAndCheck("CLEAR_SUMMARY_TEST", "Cleared memory summary")
   // With summary/DREAM enabled, the completion event may regenerate a summary
   // immediately after the clear tool finishes. Disabled runs must stay empty.
@@ -156,8 +156,8 @@ try {
   }
   console.log(`OK: parallel writes through Code Mode Promise.all, summary-only clear${disableSummary ? ", summary hidden and DREAM summary disabled" : ""}`)
   console.log(disableAutomatic
-    ? `OK: real CLI load, nine tools, write/read, DREAM and SURFACE disabled${configOptions ? " through opencode.jsonc" : ""}, migration, local-only privacy`
-    : `OK: real CLI load, nine tools, write/read, context, DREAM, migration, local-only privacy, tool-free internal calls`)
+    ? `OK: real CLI load, ten tools, write/read, DREAM and SURFACE disabled${configOptions ? " through opencode.jsonc" : ""}, migration, local-only privacy`
+    : `OK: real CLI load, ten tools, write/read, context, DREAM, migration, local-only privacy, tool-free internal calls`)
   writeFileSync(join(root, "result.json"), JSON.stringify({ version: version.stdout.toString().trim(), packageDir, checks: "passed", requests: model.requests.length, internalCalls: internal.length }, null, 2))
 } finally {
   child.kill("SIGTERM")

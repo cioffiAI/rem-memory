@@ -45,6 +45,7 @@ test("every environment setting can be supplied through plugin options", () => {
     gcChildAgeMs: 0, inProgressTimeoutMs: 1, rerank: true,
     rerankCandidates: 1, rerankTimeoutMs: 1, rerankCacheMs: 0,
     coreSlot: 0, surfaceRefreshMs: 0,
+    handoff: false, handoffMaxAgeHours: 1, handoffKeep: 1, handoffMaxChars: 100,
   }
   const { gcChildAgeMs: _ignored, ...effective } = options
   expect(resolveConfig(options, {})).toEqual(effective)
