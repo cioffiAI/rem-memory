@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resolveConfig } from "../src/config.ts"
@@ -88,6 +88,23 @@ test("a file absent from vcs status is reported as modified; no branch without v
   const [handoff] = (await t.store.getStore()).handoffs
   expect(handoff.files).toEqual([{ path: "src/a.ts", status: "modified" }])
   expect(handoff.branch).toBeUndefined()
+})
+
+test("in a project below the repository root, snapshot and vcs paths are mapped to the project", async () => {
+  const t = await setup()
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "rem-handoff-repo-")))
+  try {
+    await mkdir(join(repo, ".git"))
+    await mkdir(join(repo, "app"))
+    const project = join(repo, "app")
+    t.session("s1", project, [user("s1-u", "Fix it", 100), edited("s1-a", ["app/src/a.ts", "lib/x.ts"], 101)])
+    t.vcs.changed = [{ file: "app/src/a.ts", status: "added" }, { file: "lib/x.ts", status: "modified" }]
+    await writeMechanicalHandoff(t.deps, "s1")
+    const [handoff] = (await t.store.getStore()).handoffs
+    expect(handoff.files).toEqual([{ path: "src/a.ts", status: "added" }])
+  } finally {
+    await rm(repo, { recursive: true, force: true })
+  }
 })
 
 test("request is truncated to 300 chars", async () => {

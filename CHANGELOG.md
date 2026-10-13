@@ -5,6 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-10-13
+
+### Fixed
+
+- Projects that are a subdirectory of a git repository: OpenCode reports
+  `snapshot.files` and `vcs.status` paths relative to the repository root, so
+  touched files, handoff file statuses and the anchor candidates offered to
+  DREAM were wrong there. They are now resolved against the worktree root and
+  mapped to project-relative paths; files outside the project are dropped.
+
+### Changed
+
+- `.claude/` (local Claude Code settings) is ignored by git.
+
 ## [2.0.0] — 2026-10-13
 
 rem-memory is the successor of `@cioffi_ai/opencode-memory`, rebuilt for

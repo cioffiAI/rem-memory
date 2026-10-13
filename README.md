@@ -504,8 +504,13 @@ and 2.0, and back up `store.json` before trying 2.0 on a shared directory.
 
 ## Roadmap
 
-- **2.1+**: reuse the host-neutral engine from other agents (MCP server /
-  Claude Code adapter).
+- **2.1**: reuse the host-neutral engine from other agents: an MCP server for
+  the tools and a Claude Code adapter (hooks for SURFACE and DREAM) sharing the
+  same local store, so a session handoff written in one agent is picked up in
+  another.
+- **Later**: lessons learned from failed tool calls, surfaced before the next
+  attempt; a review inbox for low-confidence DREAM facts; SQLite storage for
+  concurrent multi-agent writers.
 
 ## Development
 
