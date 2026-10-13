@@ -2,7 +2,7 @@
 // (issues #2/#3).
 //
 // A package that builds is not necessarily a package that runs: the plugin
-// imports `@opencode-ai/plugin` at load time, so the tarball a user installs
+// imports `@opencode/plugin` at load time, so the tarball a user installs
 // must resolve that module from ITS OWN declared runtime dependencies, never
 // from this checkout's devDependencies (or its node_modules). This script
 // verifies exactly that, on the real artifact:
@@ -11,7 +11,7 @@
 //   2. pack                     (bun pm pack: the actual tarball)
 //   3. isolated install         (fresh temp dir OUTSIDE the checkout)
 //   4. import by package name   (resolution happens against the install dir)
-//   5. initialize V1 + V2       (both adapters register nine tools and clean up)
+//   5. initialize V2            (the adapter registers ten tools and cleans up)
 //
 // Run with: bun run verify:package   (also part of prepublishOnly)
 //
@@ -22,7 +22,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..")
-const PKG_NAME = "@cioffi_ai/opencode-memory"
+const PKG_NAME = "rem-memory"
 const EXPECTED_TOOLS = [
   "memory_read",
   "memory_write",
@@ -33,6 +33,7 @@ const EXPECTED_TOOLS = [
   "memory_irrelevant",
   "memory_forget",
   "memory_clear",
+  "memory_handoff",
 ]
 
 function run(cmd: string[], cwd: string, env: Record<string, string> = {}): string {
@@ -50,8 +51,8 @@ function step(message: string) {
 }
 
 // Executed by the isolated install: imports the package BY NAME (so Node/Bun
-// resolves both runtime SDKs inside the install dir), exercises the V1
-// server() adapter and the V2 setup() adapter, then disposes both.
+// resolves the runtime SDK inside the install dir), exercises the V2 setup()
+// adapter, then disposes it.
 const CHECK_SCRIPT = `
  import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
  import plugin from "${PKG_NAME}"
@@ -59,24 +60,23 @@ const CHECK_SCRIPT = `
 
 const EXPECTED = ${JSON.stringify(EXPECTED_TOOLS)}
 const manifest = JSON.parse(readFileSync("node_modules/${PKG_NAME}/package.json", "utf8"))
-if (!manifest.dependencies?.["@opencode-ai/plugin"]) {
-  console.error("FAIL: installed package does not declare @opencode-ai/plugin in dependencies")
-  process.exit(1)
-}
 if (!manifest.dependencies?.["@opencode/plugin"]) {
   console.error("FAIL: installed package does not declare @opencode/plugin in dependencies")
   process.exit(1)
 }
-if (plugin.id !== "cioffi.opencode-memory" || typeof plugin.setup !== "function" || typeof plugin.server !== "function") {
-  console.error("FAIL: package does not expose the V2 id/setup plus V1 server contract")
-  process.exit(1)
-}
-if (serverPlugin.id !== plugin.id || typeof serverPlugin.setup !== "function") {
-  console.error("FAIL: conventional V2 ./server export is unavailable")
+if (plugin.id !== "cioffi.rem-memory" || typeof plugin.setup !== "function" || "server" in plugin) {
+  console.error("FAIL: package does not expose the V2-only id/setup contract")
   process.exit(1)
 }
 
-const memoryDir = process.env.OPENCODE_MEMORY_DIR
+// OpenCode V2 loads a local package directory through the root server.js
+// (or index.js), not through package.json "main"/"exports".
+if (serverPlugin.id !== plugin.id || typeof serverPlugin.setup !== "function") {
+  console.error("FAIL: V2 ./server entrypoint is unavailable")
+  process.exit(1)
+}
+
+const memoryDir = process.env.REM_MEMORY_DIR
 mkdirSync(memoryDir, { recursive: true })
 writeFileSync(memoryDir + "/store.json", JSON.stringify({
   version: 1,
@@ -94,41 +94,7 @@ writeFileSync(memoryDir + "/store.json", JSON.stringify({
   }]
 }))
 
-const client = { app: { log: async () => {} } }
-const instance = await plugin.server({ client })
-
-const actual = Object.keys(instance.tool ?? {}).sort()
 const expected = [...EXPECTED].sort()
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-  console.error("FAIL: registered tools mismatch")
-  console.error("  expected:", expected.join(", "))
-  console.error("  actual:  ", actual.join(", "))
-  process.exit(1)
-}
-for (const [name, t] of Object.entries(instance.tool)) {
-  if (typeof t?.execute !== "function") {
-    console.error("FAIL: tool without execute():", name)
-    process.exit(1)
-  }
-}
-
-await instance.dispose()
-console.log("OK V1: " + actual.length + " tools registered, dispose() completed")
-
-const configuredDir = memoryDir + "/v1-configured"
-const configuredV1 = await plugin.server({ client }, { dir: configuredDir, dream: false, surface: false, summary: false })
-await configuredV1.tool.memory_write.execute({ fact: "Configured V1 store." }, { directory: process.cwd() })
-const configuredEntries = JSON.parse(readFileSync(configuredDir + "/store.json", "utf8")).entries
-if (configuredEntries.length !== 1 || configuredEntries[0].text !== "Configured V1 store.") {
-  console.error("FAIL: installed V1 adapter ignored plugin options")
-  process.exit(1)
-}
-const configuredOutput = { system: [] }
-await configuredV1["experimental.chat.system.transform"]({ sessionID: "configured" }, configuredOutput)
-if (configuredOutput.system.length) {
-  console.error("FAIL: installed V1 adapter surfaced memory despite options")
-  process.exit(1)
-}
 async function verifyControls(call, dir) {
   const facts = [
     "The user prefers that repositories be useful and non-wordy.",
@@ -145,12 +111,9 @@ async function verifyControls(call, dir) {
   const cleared = JSON.parse(readFileSync(path, "utf8"))
   if (cleared.summary !== "" || cleared.entries.length !== saved.entries.length) throw new Error("packed summary-only clear lost facts")
 }
-await verifyControls(async (name, args) => configuredV1.tool[name].execute(args, { directory: process.cwd() }), configuredDir)
-await configuredV1.dispose()
-console.log("OK V1: isolated options, parallel writes, hidden summary, summary-only clear")
-
 const v2Tools = []
 const hooks = {}
+const commands = []
 const subscribe = async function* ({ signal } = {}) {
   if (signal?.aborted) return
   await new Promise((resolve) => signal?.addEventListener("abort", resolve, { once: true }))
@@ -181,6 +144,12 @@ const v2ctx = {
     }),
     context: async () => [{ id: "m1", type: "user", text: "coffee morning", time: { created: Date.now() } }],
   },
+  command: {
+    transform: async (callback) => {
+      callback({ add: (definition) => commands.push(definition) })
+      return { dispose: async () => {} }
+    },
+  },
   event: { subscribe },
   generate: { text: async () => ({ text: '{"new":[],"summary":""}' }) },
 }
@@ -204,8 +173,8 @@ if (!String(result.content).includes("coffee in the morning")) {
 }
 await verifyControls(async (name, args) => (await v2Tools.find((tool) => tool.name === name).execute(args, toolContext)).content, memoryDir)
 const migrated = JSON.parse(readFileSync(memoryDir + "/store.json", "utf8"))
-if (migrated.version !== 2 || migrated.entries.find((entry) => entry.id === "legacy-1")?.tier !== "core") {
-  console.error("FAIL: installed package did not migrate the V1 store to V2")
+if (migrated.version !== 3 || migrated.entries.find((entry) => entry.id === "legacy-1")?.tier !== "core") {
+  console.error("FAIL: installed package did not migrate the v1 store schema to v2")
   process.exit(1)
 }
 const event = { sessionID: "s-v2", system: [], messages: [], tools: {}, options: {}, agent: "build", model: { providerID: "test", id: "test" } }
@@ -214,12 +183,16 @@ if (!event.system.some((part) => part.type === "text" && part.text.includes("<me
   console.error("FAIL: V2 context hook did not inject memory")
   process.exit(1)
 }
+if (commands.map((command) => command.name).join() !== "memory") {
+  console.error("FAIL: native /memory command was not registered")
+  process.exit(1)
+}
 await cleanup?.()
-console.log("OK V2: " + v2Names.length + " tools, migration/read/write/context, parallel writes, summary controls, cleanup")
+console.log("OK V2: " + v2Names.length + " tools, /memory command, migration/read/write/context, parallel writes, summary controls, cleanup")
 `
 
-const artifactsDir = mkdtempSync(join(tmpdir(), "opencode-memory-artifacts-"))
-const installDir = mkdtempSync(join(tmpdir(), "opencode-memory-install-"))
+const artifactsDir = mkdtempSync(join(tmpdir(), "rem-memory-artifacts-"))
+const installDir = mkdtempSync(join(tmpdir(), "rem-memory-install-"))
 let ok = false
 try {
   step("build")
@@ -241,22 +214,20 @@ try {
   step("install in a clean directory outside the checkout")
   writeFileSync(
     join(installDir, "package.json"),
-    JSON.stringify({ name: "opencode-memory-install-check", private: true }, null, 2),
+    JSON.stringify({ name: "rem-memory-install-check", private: true }, null, 2),
   )
   run(["bun", "add", tarball], installDir)
 
-  step("import, exercise V1 and V2 adapters, dispose")
+  step("import, exercise the V2 adapter, dispose")
   writeFileSync(join(installDir, "check.mjs"), CHECK_SCRIPT)
-  const out = run(["bun", "check.mjs"], installDir, { OPENCODE_MEMORY_DIR: join(installDir, "memory") })
+  const out = run(["bun", "check.mjs"], installDir, { REM_MEMORY_DIR: join(installDir, "memory") })
   process.stdout.write(out)
 
-  for (const major of ["1", "2"]) {
-    const binary = process.env[`OPENCODE_TEST_BIN_V${major}`]
-    if (!binary) continue
-    step(`real OpenCode V${major} against the installed tarball`)
+  const binary = process.env.OPENCODE_TEST_BIN_V2
+  if (binary) {
+    step("real OpenCode V2 against the installed tarball")
     process.stdout.write(run(["bun", join(ROOT, "scripts", "verify-runtime.ts")], ROOT, {
       OPENCODE_TEST_BIN: binary,
-      OPENCODE_TEST_MAJOR: major,
       OPENCODE_TEST_PACKAGE: join(installDir, "node_modules", PKG_NAME),
     }))
   }

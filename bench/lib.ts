@@ -37,7 +37,7 @@ const DAY = 24 * 60 * 60 * 1000
 const t = Date.now()
 
 export function buildStore(memories: Scenario["memories"]): Store {
-  const store: Store = { version: 2, summary: "", updatedAt: t, entries: [] }
+  const store: Store = { version: 3, summary: "", updatedAt: t, entries: [], handoffs: [] }
   memories.forEach((m, i) => {
     const tierEntry = (CORE_CATEGORIES.has(m.category ?? "other") ? "core" : "archival") as Entry["tier"]
     const lastSeen = t - (m.lastSeenAgoDays ?? 0) * DAY

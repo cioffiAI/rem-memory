@@ -5,6 +5,88 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-13
+
+rem-memory is the successor of `@cioffi_ai/opencode-memory`, rebuilt for
+OpenCode V2. See the README for the 1.x upgrade guide.
+
+### Removed
+
+- OpenCode V1 support: the V1 adapter (`server()` export, `src/v1.ts`, headless
+  child sessions, orphan GC), the V1-only `src/rerank.ts` and the
+  `@opencode-ai/plugin` dependency. V1 users should stay on
+  `@cioffi_ai/opencode-memory` 1.x.
+- `gcChildAgeMs` no longer has any effect (see Changed).
+- The manual `curl … commands/memory.md` installation step.
+
+### Changed
+
+- Package renamed to `rem-memory` (plugin id `cioffi.rem-memory`, log prefix
+  `[rem-memory]`, `SUMMARY.md` heading `# rem-memory summary`). Tool names
+  `memory_*` are unchanged. The `plugins` entry is now `"rem-memory"`.
+- Environment variables are now `REM_MEMORY_*`. The old `OPENCODE_MEMORY_*`
+  names are read as a fallback with one deprecation warning per process;
+  `REM_MEMORY_*` wins when both are set.
+- Default data directory is `~/.local/share/rem-memory`.
+- `gcChildAgeMs` is still accepted and validated but ignored; setting it logs
+  a deprecation warning.
+- The store schema is version 3 (additive: `anchors` on entries, `handoffs` on
+  the store). Version 1 and 2 stores are upgraded on read. Releases before 2.0
+  cannot read a version 3 store: they see an empty one, so do not point 1.x at
+  a directory used by 2.0.
+- Internals split into a host-neutral engine (`src/engine/`: DREAM, SURFACE,
+  tools, anchors, handoff) and a thin OpenCode adapter (`src/hosts/opencode.ts`).
+  No behavior change; retrieval benchmark numbers are identical to 1.7.2.
+- `memory_clear({ scope: "project" })` also removes the project's handoffs and
+  `memory_clear()` removes all of them.
+- The DREAM prompt gains a handoff task only while `handoff` is enabled; with
+  `handoff: false` it is unchanged.
+
+### Added
+
+- Native `/memory` command, registered by the plugin through
+  `command.transform`; it forwards the instructions of `commands/memory.md`
+  (embedded at build time) and the user's arguments to the session. New option
+  `command` (`REM_MEMORY_COMMAND`, default true) skips the registration. A user
+  file command named `memory` takes precedence over the plugin's.
+- One-time migration of `store.json`, `state.json` and `SUMMARY.md` from
+  `~/.local/share/opencode/memory` when `dir` is not set explicitly and the new
+  directory has no store. A `MIGRATED_TO_REM_MEMORY` marker is written in the
+  old directory; old files are never deleted.
+- Code-anchored memories: `anchors` (`"path"` or `"path#symbol"`, max 3) on
+  `memory_write` and `memory_update` for project facts. Anchor state
+  (`fresh` / `drifted` / `broken`) is derived on demand from a content hash and
+  symbol check and never persisted. Drifted facts are surfaced with a
+  `(code changed since: …)` note; broken ones are left out of the automatic
+  block. New module `src/engine/anchors.ts`.
+- `memory_inspect({ show: "stale" })`, `[drifted]` / `[stale: …]` markers in
+  `memory_read`, and an `Anchors:` section in `memory_why`.
+- DREAM can anchor new project facts to files touched in the session and is
+  told about broken anchors (`anchor=broken(…)`); explicit entries stay protected.
+- `memory_write` (same text), `memory_update` and `memory_useful` re-anchor.
+- Session handoff: a mechanical "where we left off" note (touched files, branch,
+  last request) written as soon as a session completes, optionally enriched by
+  DREAM with a goal/state/next/open-questions narrative, and injected once into
+  the first request of the next session of the same project.
+- `memory_handoff` tool (`show`, `list`, `dismiss`); 10 tools in total.
+- Options `handoff`, `handoffMaxAgeHours`, `handoffKeep`, `handoffMaxChars`
+  (`REM_MEMORY_HANDOFF*`).
+- `/memory resume` in `commands/memory.md`.
+
+### Security
+
+- Anchor paths are resolved with `realpath` and must stay inside the project;
+  traversal, absolute paths and escaping symlinks are rejected.
+
+### Fixed
+
+- DREAM, semantic dedup and rerank work with OpenCode's free-tier models. The
+  top-level `ctx.generate.text()` used since 1.7.0 is rejected there ("can only
+  be used from within OpenCode"), so consolidation silently never ran; internal
+  generation now uses `ctx.session.generate()` with the system prompt and
+  conversation stripped (tool definitions kept only for the `opencode`
+  provider, never executed).
+
 ## [1.7.2] — 2026-09-30
 
 ### Added

@@ -35,7 +35,7 @@ export function startMockModel() {
             { fact: "The user prefers concise responses.", category: "preferences" },
           ]
           // V2 exposes plugin tools through Code Mode by default. Use only the
-          // advertised path; V1 exposes the same tools directly.
+          // advertised path.
           const direct = body.tools?.some((tool: any) => tool.function?.name === name)
           if (!direct && !joined.includes(`tools.${name}(`)) throw new Error(`${name} missing from model tool catalog`)
           calls = parallel && direct ? parallelArgs.map((args, index) => ({

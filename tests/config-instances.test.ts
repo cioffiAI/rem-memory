@@ -1,4 +1,4 @@
-// @ts-nocheck — focused fake contexts for both OpenCode adapter shapes.
+// @ts-nocheck — focused fake context for the OpenCode adapter.
 import { expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -9,44 +9,13 @@ function entries(dir: string) {
   return JSON.parse(readFileSync(join(dir, "store.json"), "utf8")).entries
 }
 
-test("V1 keeps opencode.jsonc options and store paths separate per instance", async () => {
-  const root = mkdtempSync(join(tmpdir(), "memory-v1-options-"))
-  const a = join(root, "a")
-  const b = join(root, "b")
-  const client = {
-    session: {
-      get: async () => ({ data: { directory: "/project-b" } }),
-      messages: async () => ({ data: [] }),
-    },
-  }
-  try {
-    const first = await plugin.server({ client }, { dir: a, dream: false, surface: false })
-    const second = await plugin.server({ client }, { dir: b, dream: false, surface: true })
-    await first.tool.memory_write.execute({ fact: "Project A prefers tea.", category: "preferences" }, { directory: "/project-a" })
-    await second.tool.memory_write.execute({ fact: "Project B prefers coffee.", category: "preferences" }, { directory: "/project-b" })
-    expect(entries(a).map((entry) => entry.text)).toEqual(["Project A prefers tea."])
-    expect(entries(b).map((entry) => entry.text)).toEqual(["Project B prefers coffee."])
-    const blocked = { system: [] }
-    const enabled = { system: [] }
-    await first["experimental.chat.system.transform"]({ sessionID: "a" }, blocked)
-    await second["experimental.chat.system.transform"]({ sessionID: "b" }, enabled)
-    expect(blocked.system).toEqual([])
-    expect(enabled.system.join("\n")).toContain("Project B prefers coffee.")
-    expect(enabled.system.join("\n")).not.toContain("Project A prefers tea.")
-    await first.dispose()
-    await second.dispose()
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("V2 keeps opencode.jsonc options and store paths separate per instance", async () => {
+test("keeps opencode.jsonc options and store paths separate per instance", async () => {
   const root = mkdtempSync(join(tmpdir(), "memory-v2-options-"))
   function context(dir: string, directory: string, surface: boolean) {
     const tools = []
     const hooks = {}
     const ctx = {
-      options: { dir, dream: false, surface },
+      options: { dir, dream: false, handoff: false, surface },
       location: { directory },
       tool: {
         transform: async (callback) => {

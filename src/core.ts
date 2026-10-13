@@ -1,4 +1,4 @@
-// Pure logic of opencode-memory, kept free of opencode runtime dependencies so
+// Pure logic of rem-memory, kept free of opencode runtime dependencies so
 // it can be unit-tested directly. The plugin entrypoint (index.ts) imports
 // from here; nothing of this module is re-exported from the entrypoint.
 
@@ -41,16 +41,38 @@ export type Entry = {
   // recorded separately and feeds statistics only (never the score).
   lastSurfaced?: number
   surfacedCount?: number
+  // Code anchors (v3): files/symbols this fact is about.
+  anchors?: Anchor[]
   // Privacy (v2): local-only facts are stored on disk only; they never reach
   // any model-visible path (see readableEntries / consolidationEntries).
   sensitivity?: "normal" | "private" | "local-only"
 }
 
+// Code anchor (v3): ties a project fact to a file (and optionally a symbol).
+export type Anchor = { path: string; symbol?: string; hash: string; anchoredAt: number }
+
+// Session handoff (v3): a "where we left off" note for the next session.
+export type Handoff = {
+  id: string
+  projectID: string
+  sessionID: string
+  origin: { host: "opencode"; agent?: string }
+  createdAt: number
+  updatedAt: number
+  branch?: string
+  request?: string
+  files: { path: string; status: string }[]
+  narrative?: { goal: string; state: string; next: string[]; openQuestions: string[] }
+  level: "mechanical" | "enriched"
+  dismissedAt?: number
+}
+
 export type Store = {
-  version: 2
+  version: 3
   summary: string
   updatedAt: number
   entries: Entry[]
+  handoffs: Handoff[]
 }
 
 export const DAY = 24 * 60 * 60 * 1000
@@ -61,16 +83,17 @@ export const DAY = 24 * 60 * 60 * 1000
 export const CATEGORIES = ["user", "project", "workflow", "preferences", "decisions", "status", "environment", "other"]
 
 export function emptyStore(): Store {
-  return { version: 2, summary: "", updatedAt: 0, entries: [] }
+  return { version: 3, summary: "", updatedAt: 0, entries: [], handoffs: [] }
 }
 
-// Legacy stores (version 1) are migrated in place: unknown categories fall
+// Legacy stores (version 1 and 2) are migrated in place (to 3, additively): unknown categories fall
 // back to "other", and each entry gets its tier, status and sensitivity
 // defaults derived from what v1 already encoded.
 export function normalizeStore(store: Store): Store {
   const v = (store as { version?: unknown }).version
-  if (v !== 1 && v !== 2) return emptyStore()
-  store.version = 2
+  if (v !== 1 && v !== 2 && v !== 3) return emptyStore()
+  store.version = 3
+  if (!Array.isArray(store.handoffs)) store.handoffs = []
   for (const e of store.entries) {
     if (e.category === "general" || !CATEGORIES.includes(e.category)) e.category = "other"
     if (!e.tier) e.tier = CORE_CATEGORIES.has(e.category) ? "core" : "archival"
@@ -192,7 +215,7 @@ export function topicClash(a: string, b: string): boolean {
 //     prompts (entries list AND dedup prompt), semantic rerank candidates,
 //     summaries-by-construction, tool responses (memory_read/why/inspect),
 //     and every mutating tool (update/forget/feedback). The only supported
-//     access path is direct file inspection of OPENCODE_MEMORY_DIR by the
+//     access path is direct file inspection of REM_MEMORY_DIR by the
 //     human user.
 // ---------------------------------------------------------------------------
 
@@ -497,6 +520,23 @@ export function prune(store: Store, t = Date.now(), maxEntries = 400) {
 
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
+// Anchors reaching applyConsolidation were already resolved against the
+// filesystem by the DREAM step; here we only keep well-formed ones.
+function sanitizeAnchors(value: unknown): Anchor[] {
+  if (!Array.isArray(value)) return []
+  const anchors: Anchor[] = []
+  for (const item of value) {
+    if (!item || typeof item.path !== "string" || typeof item.hash !== "string" || typeof item.anchoredAt !== "number") continue
+    anchors.push({
+      path: item.path,
+      ...(typeof item.symbol === "string" && item.symbol ? { symbol: item.symbol } : {}),
+      hash: item.hash,
+      anchoredAt: item.anchoredAt,
+    })
+  }
+  return anchors.slice(0, 3)
+}
+
 export type ConsolidationSource = {
   sessionID?: string
   messageIDs?: string[]
@@ -546,6 +586,8 @@ export function applyConsolidation(
       existing.extractedAt = t
       if (confidence !== undefined) existing.confidence = confidence
       if (scope === "project" && !existing.projectID) existing.projectID = projectID
+      const anchors = existing.scope === "project" ? sanitizeAnchors(item.anchors) : []
+      if (anchors.length > 0) existing.anchors = anchors
     } else {
       // Topic-level guard: same category + shared content word → treat as
       // duplicate of an explicit fact even across languages. Restricted to
@@ -557,11 +599,13 @@ export function applyConsolidation(
         log?.("debug", "dedup skipped (topic clash with explicit)", { text, existingId: clash.id })
         continue
       }
+      const anchors = scope === "project" ? sanitizeAnchors(item.anchors) : []
       addEntry(store, {
         text,
         category,
         scope,
         projectID: scope === "project" ? projectID : undefined,
+        ...(anchors.length > 0 ? { anchors } : {}),
         weight: 1,
         lastSeen: t,
         source: "dreamed",
@@ -588,6 +632,8 @@ export function applyConsolidation(
       target.lastSeen = t
       target.extractedAt = t
       target.sourceSessionID = source?.sessionID ?? target.sourceSessionID
+      const anchors = target.scope === "project" ? sanitizeAnchors(item.anchors) : []
+      if (anchors.length > 0) target.anchors = anchors
     }
   }
   for (const item of parsed.delete ?? []) {
